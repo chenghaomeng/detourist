@@ -113,19 +113,13 @@ class RouteOrchestrator:
                 processing_time_seconds=processing_time,
                 metadata={
                     'total_routes_generated': len(routes),
-                    'waypoints_found': len(waypoints),
-                    'search_zone_area_km2': self._calculate_zone_area(search_zone)
+                    'waypoints_found': len(waypoints)
                 }
             )
             
         except Exception as e:
             self.logger.error(f"Error generating routes: {str(e)}")
             raise
-    
-    def _calculate_zone_area(self, search_zone) -> float:
-        """Calculate area of search zone in km²."""
-        # TODO: Implement area calculation
-        return 0.0
     
     def health_check(self) -> Dict[str, Any]:
         """Check health of all modules."""
