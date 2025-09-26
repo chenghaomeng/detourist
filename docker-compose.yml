@@ -44,6 +44,7 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=10m
+      - OLLAMA_GPU_LAYERS=35  # Use GPU for 35 layers (out of 40 total)
     restart: unless-stopped
 
   redis:

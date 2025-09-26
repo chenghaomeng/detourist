@@ -50,7 +50,7 @@ Please extract the following information and respond with ONLY a valid JSON obje
    - "no highways" → avoid_highways: true
    - "walking only" → transport_mode: "walking"
 
-RESPOND WITH ONLY THIS JSON FORMAT:
+RESPOND WITH ONLY THIS JSON FORMAT. DO NOT ADD ANY OTHER TEXT. DO NOT INCLUDE ANY EXPLANATORY COMMENTS:
 {{
     "origin": "specific location",
     "destination": "specific location", 
