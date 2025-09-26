@@ -28,12 +28,18 @@ export interface RouteGenerationResponse {
 export const apiService = {
   async generateRoutes(userPrompt: string, maxResults: number = 5): Promise<RouteGenerationResponse> {
     try {
+      console.log('Making request to:', API_BASE_URL + '/generate-routes')
+      console.log('Request data:', { user_prompt: userPrompt, max_results: maxResults })
+      
       const response = await apiClient.post<RouteGenerationResponse>('/generate-routes', {
         user_prompt: userPrompt,
         max_results: maxResults,
       })
+      
+      console.log('Response received:', response.data)
       return response.data
     } catch (error) {
+      console.error('API Error:', error)
       if (axios.isAxiosError(error)) {
         if (error.response) {
           throw new Error(`Server error: ${error.response.data.detail || error.response.statusText}`)

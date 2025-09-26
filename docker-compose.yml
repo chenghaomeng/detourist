@@ -13,11 +13,14 @@ services:
       - POI_API_KEY=${POI_API_KEY}
       - ROUTING_API_KEY=${ROUTING_API_KEY}
       - CLIP_MODEL_PATH=/app/models/clip_model.pth
+      - OPENAI_COMPATIBLE_URL=${OPENAI_COMPATIBLE_URL:-http://ollama:11434/v1/chat/completions}
+      - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY:-dummy-key}
     volumes:
       - ./models:/app/models
       - ./logs:/app/logs
     depends_on:
       - redis
+      - ollama
     restart: unless-stopped
 
   frontend:
@@ -32,6 +35,17 @@ services:
       - backend
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=10m
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:
@@ -42,3 +56,4 @@ services:
 
 volumes:
   redis_data:
+  ollama_data:

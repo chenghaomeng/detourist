@@ -16,6 +16,7 @@ import uvicorn
 import os
 
 from backend.orchestrator import RouteOrchestrator, RouteRequest, RouteResponse
+from backend.extraction.llm_extractor import LLMExtractor
 
 
 # Pydantic models for API
@@ -62,14 +63,20 @@ def get_orchestrator() -> RouteOrchestrator:
     """Dependency to get orchestrator instance."""
     global orchestrator
     if orchestrator is None:
-        config = {
-            'llm_api_key': os.getenv('LLM_API_KEY', ''),
-            'geocoding_api_key': os.getenv('GEOCODING_API_KEY', ''),
-            'poi_api_key': os.getenv('POI_API_KEY', ''),
-            'routing_api_key': os.getenv('ROUTING_API_KEY', ''),
-            'clip_model_path': os.getenv('CLIP_MODEL_PATH', '')
-        }
-        orchestrator = RouteOrchestrator(config)
+        try:
+            config = {
+                'llm_api_key': os.getenv('LLM_API_KEY', ''),
+                'geocoding_api_key': os.getenv('GEOCODING_API_KEY', ''),
+                'poi_api_key': os.getenv('POI_API_KEY', ''),
+                'routing_api_key': os.getenv('ROUTING_API_KEY', ''),
+                'clip_model_path': os.getenv('CLIP_MODEL_PATH', '')
+            }
+            print("Initializing orchestrator...")
+            orchestrator = RouteOrchestrator(config)
+            print("Orchestrator initialized successfully")
+        except Exception as e:
+            print(f"Error initializing orchestrator: {str(e)}")
+            raise e
     return orchestrator
 
 
