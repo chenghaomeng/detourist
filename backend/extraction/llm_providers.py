@@ -113,8 +113,8 @@ class LlamaProvider(LLMProvider):
         if match:
             return match.group(1).strip()
         
-        # Try to find JSON without markdown
-        json_pattern = r'(\{.*?\})'
+        # Try to find JSON without markdown - use greedy matching to get complete JSON
+        json_pattern = r'(\{.*\})'
         match = re.search(json_pattern, response_text, re.DOTALL)
         if match:
             return match.group(1).strip()

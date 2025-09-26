@@ -24,19 +24,25 @@ Response: "bike lanes, parks, beach access"
 """
 
 # Enhanced extraction prompt template with FAISS candidate selection
-EXTRACTION_PROMPT_WITH_CANDIDATES_TEMPLATE = """You are a route planning assistant. Extract structured information from the user's route request.
+def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: List[str], num_tags: int = 5) -> str:
+    """Create the extraction prompt with candidate OSM tags for LLM selection."""
+    candidate_text = "\n".join([f"- {tag}" for tag in candidate_tags])
+    return f"""You are a route planning assistant. Extract structured information from the user's route request.
 
 USER REQUEST: "{user_prompt}"
 
 CANDIDATE OSM TAGS (choose the most relevant ones):
-{candidate_tags}
+{candidate_text}
 
 Please extract the following information and respond with ONLY a valid JSON object:
 
 1. ORIGIN: The starting location (be specific with city/neighborhood if mentioned)
 2. DESTINATION: The ending location (be specific with city/neighborhood if mentioned)
 3. TIME_FLEXIBILITY: How many extra minutes the user is willing to spend (extract from phrases like "extra 15 minutes", "spare 20 minutes", "willing to spend X more minutes")
-4. WAYPOINT_QUERIES: Select the most relevant OSM tags from the candidates above that match the user's preferences. Use the format "key=value" (e.g., "amenity=cafe", "leisure=park")
+4. WAYPOINT_QUERIES: Select the {num_tags} MOST RELEVANT OSM tags from the candidates above that match the user's preferences. 
+   - Return them in order of relevance (best match first)
+   - Use the format "key=value" (e.g., "amenity=cafe", "leisure=park")
+   - Choose exactly {num_tags} tags, no more, no less
 5. CONSTRAINTS: Extract routing constraints:
    - "avoid tolls" → avoid_tolls: true
    - "no stairs" → avoid_stairs: true
@@ -49,7 +55,7 @@ RESPOND WITH ONLY THIS JSON FORMAT:
     "origin": "specific location",
     "destination": "specific location", 
     "time_flexibility_minutes": number,
-    "waypoint_queries": ["key=value", "key=value"],
+    "waypoint_queries": ["key=value", "key=value", "key=value", "key=value", "key=value"],
     "constraints": {{
         "avoid_tolls": boolean,
         "avoid_stairs": boolean,
@@ -61,23 +67,5 @@ RESPOND WITH ONLY THIS JSON FORMAT:
 
 If information is not specified, use reasonable defaults:
 - time_flexibility_minutes: 10
-- waypoint_queries: [] (only include tags from the candidates above)
+- waypoint_queries: [] (only include tags from the candidates above, exactly {num_tags} tags)
 - constraints: {{"avoid_tolls": false, "avoid_stairs": false, "avoid_hills": false, "avoid_highways": false, "transport_mode": "walking"}}"""
-
-
-def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: List[str]) -> str:
-    """
-    Create the extraction prompt with candidate OSM tags for LLM selection.
-    
-    Args:
-        user_prompt: The user's natural language route request
-        candidate_tags: List of candidate OSM tags from vector search
-        
-    Returns:
-        Formatted prompt ready for LLM processing
-    """
-    candidate_text = "\n".join([f"- {tag}" for tag in candidate_tags])
-    return EXTRACTION_PROMPT_WITH_CANDIDATES_TEMPLATE.format(
-        user_prompt=user_prompt,
-        candidate_tags=candidate_text
-    )

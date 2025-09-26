@@ -10,7 +10,8 @@ export default defineConfig({
       '/api': {
         target: 'http://backend:8000', // Use Docker service name
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        timeout: 300000, // 5 minutes timeout for Ollama inference
       }
     }
   }

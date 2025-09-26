@@ -37,7 +37,7 @@ class LLMExtractor:
         self.osm_validator = OSMTagValidator()
         self.logger = logging.getLogger(__name__)
     
-    def extract_parameters(self, user_prompt: str) -> ExtractedParameters:
+    def extract_parameters(self, user_prompt: str, num_tags: int = 5) -> ExtractedParameters:
         """
         Extract structured parameters from user prompt using two-step LLM process:
         1. Extract preferences for FAISS search
@@ -45,6 +45,7 @@ class LLMExtractor:
         
         Args:
             user_prompt: Natural language description of desired route
+            num_tags: Number of waypoint query tags to extract (default: 5)
             
         Returns:
             ExtractedParameters object with structured data
@@ -58,7 +59,7 @@ class LLMExtractor:
             candidate_tag_strings = [f"{tag.key}={tag.value}" for tag in candidate_tags]
             
             # Step 3: Extract full parameters with FAISS candidates
-            extraction_prompt = create_extraction_prompt_with_candidates(user_prompt, candidate_tag_strings)
+            extraction_prompt = create_extraction_prompt_with_candidates(user_prompt, candidate_tag_strings, num_tags)
             response = self.provider_manager.extract_parameters(extraction_prompt)
             
             # Parse the response
