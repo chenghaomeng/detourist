@@ -55,7 +55,7 @@ class LLMExtractor:
             preferences = self._extract_preferences(user_prompt)
             
             # Step 2: Get candidate OSM tags using cleaned preferences
-            candidate_tags = self.osm_validator.get_candidate_tags(preferences, top_k=20)
+            candidate_tags = self.osm_validator.get_candidate_tags(preferences, top_k=30)
             candidate_tag_strings = [f"{tag.key}={tag.value}" for tag in candidate_tags]
             
             # Step 3: Extract full parameters with FAISS candidates
