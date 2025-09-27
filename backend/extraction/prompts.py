@@ -7,20 +7,19 @@ USER REQUEST: "{user_prompt}"
 
 Extract and return ONLY the preferences and interests that would help find relevant places/amenities along the route. 
 Focus on:
-- Types of places they want to see (coffee shops, parks, waterfronts, etc.)
-- Activities they want to do (walking, cycling, scenic views, etc.)
+- Types of places they want to see (parks, waterfronts, etc.)
 - Atmosphere preferences (quiet, bustling, scenic, etc.)
-- Specific amenities or features they mentioned
+- Specific amenities or features they mentioned (coffee shops, greenery, etc.)
+
+Ignore:
+- Mode of transport (walking, cycling, driving, etc.)
+- Constraints/avoidances (avoid hills, avoid stairs, etc.)
 
 Respond with ONLY a clean, concise list of preferences separated by commas. Do not include origin/destination or constraints. Do not include any extra text besides the list.
 
 Example:
 User: "Take me from Union Square to Golden Gate Park, avoiding hills. I want to see coffee shops and waterfronts."
 Response: "coffee shops, waterfronts, scenic views"
-
-Example:
-User: "Route from downtown to the beach, I need bike lanes and want to stop at parks"
-Response: "bike lanes, parks, beach access"
 """
 
 # Enhanced extraction prompt template with FAISS candidate selection
