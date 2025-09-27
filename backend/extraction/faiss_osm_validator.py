@@ -402,10 +402,10 @@ class FAISSOSMTagValidator:
     
     def get_candidate_tags(self, user_prompt: str, top_k: int = 15) -> List[OSMTag]:
         """
-        Get candidate OSM tags using vector search on the user prompt.
+        Get candidate OSM tags using vector search on individual concepts from the user prompt.
         
         Args:
-            user_prompt: Original user prompt
+            user_prompt: Comma-separated preferences (e.g., "coffee shops, greenery, trees")
             top_k: Number of candidate tags to return
             
         Returns:
@@ -416,8 +416,26 @@ class FAISSOSMTagValidator:
             self.logger.info("Building OSM tag database on first use...")
             self.db.build_database_from_taginfo()
         
-        search_result = self.db.vector_search(user_prompt, top_k)
-        return search_result.tags
+        # Split preferences into individual concepts
+        concepts = [concept.strip() for concept in user_prompt.split(',')]
+        
+        all_candidates = []
+        for concept in concepts:
+            # Distribute top_k among concepts
+            concept_top_k = max(3, top_k // len(concepts))
+            concept_results = self.db.vector_search(concept, concept_top_k)
+            all_candidates.extend(concept_results.tags)
+        
+        # Simple deduplication - remove duplicates
+        seen = set()
+        unique_candidates = []
+        for tag in all_candidates:
+            if (tag.key, tag.value) not in seen:
+                seen.add((tag.key, tag.value))
+                unique_candidates.append(tag)
+        
+        return unique_candidates
+    
     
     def _is_database_populated(self) -> bool:
         """Check if the database has any tags."""
