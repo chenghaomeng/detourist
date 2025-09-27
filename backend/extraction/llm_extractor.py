@@ -74,7 +74,7 @@ class LLMExtractor:
             print("="*60)
             print(f"📝 User Prompt: {user_prompt}")
             print(f"🔍 Extracted Preferences: {preferences}")
-            print(f"🏷️  Candidate Tags ({len(candidate_tag_strings)}): {', '.join(candidate_tag_strings[:30])}")
+            print(f"🏷️  Candidate Tags ({len(candidate_tag_strings)}): {', '.join(candidate_tag_strings)}")
             print(f"📍 Origin: {extracted_params.origin}")
             print(f"🎯 Destination: {extracted_params.destination}")
             print(f"⏱️  Time Flexibility: {extracted_params.time_flexibility_minutes} minutes")
