@@ -297,8 +297,14 @@ class FAISSOSMTagDatabase:
         Returns:
             TagSearchResult with most similar tags
         """
-        if not FAISS_AVAILABLE or not self.embedding_model or not self.faiss_index:
-            return self._fallback_text_search(query, top_k)
+        if not FAISS_AVAILABLE:
+            raise Exception("FAISS is not available. Install with: pip install faiss-cpu")
+        
+        if not self.embedding_model:
+            raise Exception("Embedding model is not available. Install with: pip install sentence-transformers")
+        
+        if not self.faiss_index or self.faiss_index.ntotal == 0:
+            raise Exception("FAISS index is empty or not built. Call build_database_from_taginfo() first.")
         
         # Generate query embedding
         query_embedding = self.embedding_model.encode([query])
@@ -348,47 +354,6 @@ class FAISSOSMTagDatabase:
             query_embedding=query_embedding[0]
         )
     
-    def _fallback_text_search(self, query: str, top_k: int) -> TagSearchResult:
-        """Fallback to text search when FAISS is not available."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        search_query = '''
-            SELECT id, key, value, description, count_all, count_nodes, count_ways, count_relations, wiki_description
-            FROM osm_tags
-            WHERE search_text LIKE ?
-            ORDER BY count_all DESC
-            LIMIT ?
-        '''
-        
-        search_term = f"%{query}%"
-        cursor.execute(search_query, (search_term, top_k))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        tags = []
-        for row in results:
-            tag = OSMTag(
-                tag_id=row[0],
-                key=row[1],
-                value=row[2],
-                description=row[3],
-                count_all=row[4],
-                count_nodes=row[5],
-                count_ways=row[6],
-                count_relations=row[7],
-                wiki_description=row[8],
-                score=0.5  # Default score for text search fallback
-            )
-            tags.append(tag)
-        
-        return TagSearchResult(
-            query=query,
-            tags=tags,
-            search_method="fallback_text_search",
-            confidence=0.5
-        )
     
     def get_database_stats(self) -> Dict[str, Any]:
         """Get statistics about the database."""

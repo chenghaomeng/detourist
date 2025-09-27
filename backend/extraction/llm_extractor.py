@@ -89,8 +89,7 @@ class LLMExtractor:
             
         except Exception as e:
             self.logger.error(f"Error extracting parameters: {str(e)}")
-            # Fallback to mock data if LLM fails
-            return self._get_fallback_parameters(user_prompt)
+            raise Exception(f"Failed to extract parameters: {str(e)}")
     
     
     
@@ -116,11 +115,14 @@ class LLMExtractor:
         """Convert parsed data to ExtractedParameters object."""
         constraints = data.get("constraints", {})
         
+        # Filter out empty strings from waypoint queries
+        waypoint_queries = [query for query in data.get("waypoint_queries", []) if query.strip()]
+        
         return ExtractedParameters(
             origin=data.get("origin", ""),
             destination=data.get("destination", ""),
             time_flexibility_minutes=data.get("time_flexibility_minutes", 10),
-            waypoint_queries=data.get("waypoint_queries", []),
+            waypoint_queries=waypoint_queries,
             constraints={
                 "avoid_tolls": constraints.get("avoid_tolls", False),
                 "avoid_stairs": constraints.get("avoid_stairs", False),
@@ -154,25 +156,6 @@ class LLMExtractor:
             return preferences
             
         except Exception as e:
-            self.logger.warning(f"Preference extraction failed: {str(e)}")
-            # Fallback to using original prompt
-            return user_prompt
+            self.logger.error(f"Preference extraction failed: {str(e)}")
+            raise Exception(f"Failed to extract preferences: {str(e)}")
     
-    def _get_fallback_parameters(self, user_prompt: str) -> ExtractedParameters:
-        """Provide fallback parameters when LLM extraction fails."""
-        self.logger.warning("Using fallback parameters due to LLM extraction failure")
-        
-        # Simple fallback - return basic parameters
-        return ExtractedParameters(
-            origin="Central Park, New York",  # Default fallback
-            destination="Times Square, New York",  # Default fallback
-            time_flexibility_minutes=10,
-            waypoint_queries=[],  # Empty - let FAISS handle it
-            constraints={
-                "avoid_tolls": False,
-                "avoid_stairs": False,
-                "avoid_hills": False,
-                "avoid_highways": False,
-                "transport_mode": "walking"
-            }
-        )
