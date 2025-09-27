@@ -10,6 +10,7 @@ import logging
 import requests
 import time
 import numpy as np
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,6 +45,7 @@ class OSMTag:
     wiki_description: Optional[str] = None
     embedding: Optional[np.ndarray] = None
     tag_id: int = 0
+    score: float = 0.0
 
 
 @dataclass
@@ -77,6 +79,8 @@ class FAISSOSMTagDatabase:
         # Initialize FAISS index
         if FAISS_AVAILABLE:
             self.faiss_index = faiss.IndexFlatIP(self.embedding_dim)  # Inner product for cosine similarity
+            # Try to load existing FAISS index
+            self._load_faiss_index()
         else:
             self.faiss_index = None
         
@@ -142,6 +146,20 @@ class FAISSOSMTagDatabase:
         self._build_faiss_index()
         
         self.logger.info("FAISS OSM tag database build complete")
+    
+    def _load_faiss_index(self):
+        """Load FAISS index from disk if it exists."""
+        faiss_index_path = self.db_path.replace('.db', '.faiss')
+        try:
+            if os.path.exists(faiss_index_path):
+                self.faiss_index = faiss.read_index(faiss_index_path)
+                self.logger.info(f"Loaded FAISS index from {faiss_index_path} with {self.faiss_index.ntotal} vectors")
+            else:
+                self.logger.info("No existing FAISS index found, will build new one")
+        except Exception as e:
+            self.logger.warning(f"Failed to load FAISS index: {str(e)}")
+            # Reset to empty index
+            self.faiss_index = faiss.IndexFlatIP(self.embedding_dim)
     
     def _fetch_tags_from_taginfo(self):
         """Fetch real OSM tags from taginfo API."""
@@ -220,7 +238,7 @@ class FAISSOSMTagDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute("SELECT id, search_text FROM osm_tags")
+        cursor.execute("SELECT id, search_text FROM osm_tags ORDER BY id")
         rows = cursor.fetchall()
         
         if not rows:
@@ -237,6 +255,11 @@ class FAISSOSMTagDatabase:
         
         # Add to FAISS index
         self.faiss_index.add(embeddings.astype('float32'))
+        
+        # Save FAISS index to disk
+        faiss_index_path = self.db_path.replace('.db', '.faiss')
+        faiss.write_index(self.faiss_index, faiss_index_path)
+        self.logger.info(f"Saved FAISS index to {faiss_index_path}")
         
         # Store embeddings in database
         cursor.execute("DELETE FROM osm_tags WHERE embedding IS NOT NULL")  # Clear old embeddings
@@ -310,7 +333,8 @@ class FAISSOSMTagDatabase:
                     count_ways=row[6],
                     count_relations=row[7],
                     wiki_description=row[8],
-                    embedding=None  # Don't load embeddings for results
+                    embedding=None,  # Don't load embeddings for results
+                    score=float(score)  # Store the similarity score
                 )
                 tags.append(tag)
         
@@ -354,7 +378,8 @@ class FAISSOSMTagDatabase:
                 count_nodes=row[5],
                 count_ways=row[6],
                 count_relations=row[7],
-                wiki_description=row[8]
+                wiki_description=row[8],
+                score=0.5  # Default score for text search fallback
             )
             tags.append(tag)
         
@@ -438,14 +463,19 @@ class FAISSOSMTagValidator:
     
     
     def _is_database_populated(self) -> bool:
-        """Check if the database has any tags."""
+        """Check if the database has tags AND FAISS index is built."""
         import sqlite3
         conn = sqlite3.connect(self.db.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM osm_tags")
         count = cursor.fetchone()[0]
         conn.close()
-        return count > 0
+        
+        # Check both database and FAISS index
+        has_tags = count > 0
+        has_faiss_index = self.db.faiss_index and self.db.faiss_index.ntotal > 0
+        
+        return has_tags and has_faiss_index
     
     def enhance_waypoint_queries(self, user_prompt: str, llm_queries: List[str] = None) -> List[str]:
         """
