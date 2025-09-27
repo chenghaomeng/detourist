@@ -14,6 +14,7 @@ Focus on:
 Ignore:
 - Mode of transport (walking, cycling, driving, etc.)
 - Constraints/avoidances (avoid hills, avoid stairs, etc.)
+- Origin and final destination (we are only interested in the preferences ALONG THE ROUTE)
 
 Respond with ONLY a clean, concise list of preferences separated by commas. Do not include origin/destination or constraints. Do not include any extra text besides the list.
 
