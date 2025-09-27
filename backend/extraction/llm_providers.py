@@ -64,7 +64,7 @@ class LlamaProvider(LLMProvider):
                 continue
         return False
     
-    def extract_parameters(self, prompt: str) -> str:
+    def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
         """Extract parameters using Llama 3.1."""
         payload = {
             "model": self.model_name,
@@ -90,8 +90,13 @@ class LlamaProvider(LLMProvider):
             response_text = result.get("response", "")
             self.logger.info(f"Successfully received response from Ollama (length: {len(response_text)})")
             
-            # Extract JSON from the response (remove markdown formatting)
-            cleaned_response = self._extract_json_from_response(response_text)
+            # Only extract JSON if we expect JSON (for full parameter extraction)
+            if expect_json:
+                cleaned_response = self._extract_json_from_response(response_text)
+            else:
+                # For preference extraction, just return the cleaned text
+                cleaned_response = response_text.strip()
+            
             return cleaned_response
             
         except requests.exceptions.Timeout:
@@ -141,15 +146,16 @@ class LLMProviderManager:
         # Filter out None providers
         self.providers = [p for p in self.providers if p is not None]
     
-    def extract_parameters(self, prompt: str) -> str:
+    def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
         """
         Extract parameters using available LLM providers with fallback.
         
         Args:
             prompt: The extraction prompt
+            expect_json: Whether to expect JSON response (True) or plain text (False)
             
         Returns:
-            Extracted parameters as JSON string
+            Extracted parameters as string (JSON or plain text)
             
         Raises:
             Exception: If all providers fail
@@ -158,7 +164,7 @@ class LLMProviderManager:
             try:
                 if provider.is_available():
                     self.logger.info(f"Trying provider: {provider.__class__.__name__} ({provider.model_name})")
-                    result = provider.extract_parameters(prompt)
+                    result = provider.extract_parameters(prompt, expect_json)
                     self.logger.info(f"Successfully extracted parameters using {provider.__class__.__name__}")
                     return result
                 else:

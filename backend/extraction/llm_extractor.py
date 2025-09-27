@@ -144,8 +144,8 @@ class LLMExtractor:
             # Create preference extraction prompt
             preference_prompt = PREFERENCE_EXTRACTION_PROMPT.format(user_prompt=user_prompt)
             
-            # Call LLM to extract preferences
-            preferences = self.provider_manager.extract_parameters(preference_prompt)
+            # Call LLM to extract preferences (expect plain text, not JSON)
+            preferences = self.provider_manager.extract_parameters(preference_prompt, expect_json=False)
             
             # Clean up the response (remove any extra text)
             preferences = preferences.strip()
