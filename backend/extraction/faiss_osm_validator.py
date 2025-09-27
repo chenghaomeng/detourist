@@ -59,10 +59,11 @@ class TagSearchResult:
 class FAISSOSMTagDatabase:
     """FAISS-based OSM tag database with vector search capabilities."""
     
-    def __init__(self, db_path: str = "osm_tags_faiss.db", embedding_model: str = "all-MiniLM-L6-v2"):
+    def __init__(self, db_path: str = "osm_tags_faiss.db", embedding_model: str = "all-MiniLM-L6-v2", include_descriptions_in_faiss_index: bool = True):
         """Initialize the FAISS OSM tag database."""
         self.db_path = db_path
         self.embedding_model_name = embedding_model
+        self.include_descriptions_in_faiss_index = include_descriptions_in_faiss_index
         self.logger = logging.getLogger(__name__)
         
         # Initialize embedding model
@@ -185,8 +186,11 @@ class FAISSOSMTagDatabase:
             if "wiki" in tag and "en" in tag["wiki"]:
                 wiki_description = tag["wiki"]["en"].get("description")
             
-            # Create search text for embedding
-            search_text = f"{tag['key']}={tag['value']} {tag.get('description', '')} {wiki_description or ''}"
+            # Create search text for embedding (using only value, not key=value)
+            if self.include_descriptions_in_faiss_index:
+                search_text = f"{tag['value']} {tag.get('description', '')} {wiki_description or ''}"
+            else:
+                search_text = f"{tag['value']}"
             
             cursor.execute('''
                 INSERT OR REPLACE INTO osm_tags 
@@ -391,9 +395,9 @@ class FAISSOSMTagDatabase:
 class FAISSOSMTagValidator:
     """FAISS-based OSM tag validator that uses vector search."""
     
-    def __init__(self, db_path: str = "osm_tags_faiss.db"):
+    def __init__(self, db_path: str = "osm_tags_faiss.db", include_descriptions_in_faiss_index: bool = True):
         """Initialize the validator with FAISS OSM tag database."""
-        self.db = FAISSOSMTagDatabase(db_path)
+        self.db = FAISSOSMTagDatabase(db_path, include_descriptions_in_faiss_index=include_descriptions_in_faiss_index)
         self.logger = logging.getLogger(__name__)
     
     def get_candidate_tags(self, user_prompt: str, top_k: int = 15) -> List[OSMTag]:

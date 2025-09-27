@@ -34,7 +34,8 @@ class LLMExtractor:
         """Initialize with LLM provider manager and OSM tag validator."""
         self.api_key = api_key  # For future LLM providers that need API keys
         self.provider_manager = LLMProviderManager(api_key)
-        self.osm_validator = OSMTagValidator()
+        # Whether to include descriptions when building the FAISS index
+        self.osm_validator = OSMTagValidator(include_descriptions_in_faiss_index=False)
         self.logger = logging.getLogger(__name__)
     
     def extract_parameters(self, user_prompt: str, num_tags: int = 5) -> ExtractedParameters:
