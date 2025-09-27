@@ -16,6 +16,7 @@ import uvicorn
 import os
 
 from backend.orchestrator import RouteOrchestrator, RouteRequest, RouteResponse
+from backend.extraction.llm_extractor import LLMExtractor
 
 
 # Pydantic models for API
@@ -23,6 +24,7 @@ class RouteGenerationRequest(BaseModel):
     """Request model for route generation."""
     user_prompt: str = Field(..., description="Natural language description of desired route")
     max_results: int = Field(default=5, ge=1, le=10, description="Maximum number of routes to return")
+    num_tags: int = Field(default=5, ge=1, le=20, description="Number of waypoint query tags to extract")
 
 
 class RouteGenerationResponse(BaseModel):
@@ -62,14 +64,20 @@ def get_orchestrator() -> RouteOrchestrator:
     """Dependency to get orchestrator instance."""
     global orchestrator
     if orchestrator is None:
-        config = {
-            'llm_api_key': os.getenv('LLM_API_KEY', ''),
-            'geocoding_api_key': os.getenv('GEOCODING_API_KEY', ''),
-            'poi_api_key': os.getenv('POI_API_KEY', ''),
-            'routing_api_key': os.getenv('ROUTING_API_KEY', ''),
-            'clip_model_path': os.getenv('CLIP_MODEL_PATH', '')
-        }
-        orchestrator = RouteOrchestrator(config)
+        try:
+            config = {
+                'llm_api_key': os.getenv('LLM_API_KEY', ''),
+                'geocoding_api_key': os.getenv('GEOCODING_API_KEY', ''),
+                'poi_api_key': os.getenv('POI_API_KEY', ''),
+                'routing_api_key': os.getenv('ROUTING_API_KEY', ''),
+                'clip_model_path': os.getenv('CLIP_MODEL_PATH', '')
+            }
+            print("Initializing orchestrator...")
+            orchestrator = RouteOrchestrator(config)
+            print("Orchestrator initialized successfully")
+        except Exception as e:
+            print(f"Error initializing orchestrator: {str(e)}")
+            raise e
     return orchestrator
 
 
@@ -101,7 +109,7 @@ async def generate_routes(
     Generate routes from natural language prompt.
     
     Args:
-        request: Route generation request with user prompt
+        request: Route generation request with user prompt and num_tags
         orch: Route orchestrator dependency
         
     Returns:
@@ -111,7 +119,8 @@ async def generate_routes(
         # Convert API request to internal request
         internal_request = RouteRequest(
             user_prompt=request.user_prompt,
-            max_results=request.max_results
+            max_results=request.max_results,
+            num_tags=request.num_tags
         )
         
         # Generate routes

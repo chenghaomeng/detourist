@@ -24,6 +24,7 @@ class RouteRequest:
     """Request object for route generation."""
     user_prompt: str
     max_results: int = 5
+    num_tags: int = 5
 
 
 @dataclass
@@ -73,7 +74,7 @@ class RouteOrchestrator:
         try:
             # Step 1: Extract parameters from user prompt
             self.logger.info("Extracting parameters from user prompt")
-            extracted_params = self.extractor.extract_parameters(request.user_prompt)
+            extracted_params = self.extractor.extract_parameters(request.user_prompt, request.num_tags)
             
             # Step 2: Geocode origin and destination
             self.logger.info("Geocoding origin and destination")
