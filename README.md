@@ -6,7 +6,8 @@ A web application that generates custom routes from natural language prompts, in
 
 This application takes free-form text input (e.g., "I want to go from Central Park to Times Square, taking a scenic route with lots of greenery") and generates optimized routes that match user preferences using:
 
-- **LLM-based extraction** to parse user intent
+- **Two-step LLM extraction** with Ollama + Llama 3.1 8B quantized
+- **FAISS-based OSM tag search** for semantic waypoint discovery
 - **Geocoding and isochrones** to define search areas
 - **Waypoint discovery** based on user preferences
 - **Route optimization** with constraints
@@ -21,7 +22,10 @@ The backend is modularized for team development:
 ```
 backend/
 ├── extraction/          # LLM-based parameter extraction
-│   └── llm_extractor.py
+│   ├── llm_extractor.py      # Two-step LLM extraction
+│   ├── llm_providers.py      # Ollama + Llama 3.1 integration
+│   ├── faiss_osm_validator.py # FAISS-based OSM tag search
+│   └── prompts.py            # LLM prompt templates
 ├── geocoding/           # Address geocoding and isochrone creation
 │   └── geocoder.py
 ├── waypoints/           # POI search and filtering
@@ -57,31 +61,49 @@ frontend/
 
 ### Prerequisites
 
-- Python 3.11+
+- Docker and Docker Compose
+- Python 3.11+ (for local development)
 - Poetry (for Python dependency management)
-- Node.js 18+
+- Node.js 18+ (for local development)
 - API keys for:
-  - LLM service (OpenAI)
   - Geocoding (Google Maps or Mapbox)
   - POI search (Google Places or Foursquare)
   - Routing (Google Maps or Mapbox)
+  - CLIP model (optional, for visual scoring)
 
 ### Setup
 
-1. **Clone and setup**:
+1. **Clone the repository**:
    ```bash
    git clone <repository-url>
    cd free-form-text-to-route
-   ./scripts/setup.sh
    ```
 
-2. **Configure API keys**:
+2. **Start with Docker Compose**:
+   ```bash
+   # Start all services
+   docker compose up -d
+   
+   # Pull the Llama 3.1 8B quantized model
+   ./scripts/setup-ollama.sh
+   ```
+
+3. **Access the application**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:8000
+   - API Docs: http://localhost:8000/docs
+
+### Local Development Setup
+
+For local development without Docker:
+
+1. **Configure API keys**:
    ```bash
    cp .env.example .env
    # Edit .env with your API keys
    ```
 
-3. **Run the application**:
+2. **Run the application**:
    ```bash
    # Terminal 1: Backend
    poetry run start-backend
@@ -91,25 +113,13 @@ frontend/
    npm run dev
    ```
 
-4. **Access the application**:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
-
-### Docker Setup
-
-```bash
-# Build and run with Docker Compose
-docker-compose up --build
-```
-
 ## 🔧 Configuration
 
 ### Environment Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `LLM_API_KEY` | OpenAI API key | `sk-...` |
+| `LLM_API_KEY` | Reserved for future LLM providers | `sk-...` |
 | `GEOCODING_API_KEY` | Google Maps API key | `AIza...` |
 | `POI_API_KEY` | Google Places API key | `AIza...` |
 | `ROUTING_API_KEY` | Google Maps API key | `AIza...` |
@@ -166,19 +176,23 @@ npm run lint
 
 ## 📊 Algorithm Flow
 
-1. **Extraction**: Parse user prompt to extract:
-   - Origin and destination
-   - Time flexibility
-   - Waypoint preferences
-   - Routing constraints
+1. **Two-Step LLM Extraction**:
+   - **Step 1**: Extract user preferences for FAISS search
+   - **Step 2**: Extract full parameters with FAISS candidate tags
+   - Output: Origin, destination, time flexibility, waypoint queries, constraints
 
-2. **Geocoding**: Convert addresses to coordinates and create isochrones
+2. **FAISS OSM Tag Search**: 
+   - Use semantic search to find relevant OSM tags
+   - Build candidate list for LLM selection
+   - Persist FAISS index for fast subsequent searches
 
-3. **Waypoint Search**: Find POIs within search zones based on preferences
+3. **Geocoding**: Convert addresses to coordinates and create isochrones
 
-4. **Route Building**: Generate routes through waypoints with constraints
+4. **Waypoint Search**: Find POIs within search zones based on OSM tag queries
 
-5. **Scoring**: Evaluate routes using:
+5. **Route Building**: Generate routes through waypoints with constraints
+
+6. **Scoring**: Evaluate routes using:
    - CLIP scores (visual similarity)
    - Efficiency metrics
    - Preference matching
@@ -200,18 +214,6 @@ This project is designed for a 5-person team with clear module separation:
 - **Scoring**: Develop evaluation metrics and CLIP integration
 
 Each module has clear interfaces and can be developed independently.
-
-## 📝 TODO
-
-- [ ] Implement LLM extraction logic
-- [ ] Add geocoding API integration
-- [ ] Build waypoint search functionality
-- [ ] Create route optimization algorithms
-- [ ] Integrate CLIP model for visual scoring
-- [ ] Add comprehensive testing
-- [ ] Implement caching for performance
-- [ ] Add user authentication
-- [ ] Create admin dashboard
 
 ## 📄 License
 
