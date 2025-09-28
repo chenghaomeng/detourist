@@ -62,6 +62,7 @@ frontend/
 ### Prerequisites
 
 - Docker and Docker Compose
+- **8GB RAM minimum** (for Ollama + Llama 3.1 8B model)
 - Python 3.11+ (for local development)
 - Poetry (for Python dependency management)
 - Node.js 18+ (for local development)
@@ -99,11 +100,20 @@ For local development without Docker:
 
 1. **Configure API keys**:
    ```bash
-   cp .env.example .env
+   # Create .env file with your API keys
    # Edit .env with your API keys
    ```
 
-2. **Run the application**:
+2. **Set up Ollama locally** (if not using Docker):
+   ```bash
+   # Install Ollama locally
+   curl -fsSL https://ollama.ai/install.sh | sh
+   
+   # Pull the model
+   ollama pull llama3.1:8b-instruct-q4_K_M
+   ```
+
+3. **Run the application**:
    ```bash
    # Terminal 1: Backend
    poetry run start-backend
