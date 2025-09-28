@@ -1,6 +1,6 @@
 # Simple Ollama Setup with Llama 3.1 8B Quantized
 
-This guide shows how to set up Ollama with **Llama 3.1 8B Quantized** for both local development and deployment. The quantized model is faster and uses less memory while maintaining good quality.
+This guide shows how to set up Ollama with **Llama 3.1 8B Quantized (q4_K_M)** for both local development and deployment. The quantized model is faster and uses less memory while maintaining excellent quality.
 
 ## 🚀 Quick Start
 
@@ -18,10 +18,11 @@ That's it! Your application will now use Llama 3.1 8B Quantized for route extrac
 
 ## 📋 What This Setup Includes
 
-- **Ollama**: Official Docker image
-- **Llama 3.1 8B Quantized**: ~2.5GB model (faster inference, good quality)
+- **Ollama**: Official Docker image with GPU acceleration support
+- **Llama 3.1 8B Quantized (q4_K_M)**: ~4.9GB model (optimal balance of speed and quality)
 - **Persistent Storage**: Models stored in Docker volumes
 - **Simple Setup**: One script to pull the model
+- **GPU Acceleration**: Automatic Metal Performance Shaders (MPS) on Apple Silicon
 
 ## 🔧 How It Works
 
@@ -39,11 +40,11 @@ This setup works for:
 
 ## 📊 Model Details
 
-- **Model**: `llama3.1:8b`
-- **Size**: ~4.7GB
-- **RAM Usage**: ~8GB recommended
+- **Model**: `llama3.1:8b-instruct-q4_K_M`
+- **Size**: ~4.9GB (quantized)
 - **Quality**: Excellent for structured data extraction
-- **Speed**: Fast responses (~2-5 seconds)
+- **Speed**: TBD testing
+- **Quantization**: q4_K_M (4-bit with mixed precision)
 
 ## 🛠️ Troubleshooting
 
@@ -56,13 +57,13 @@ docker compose ps ollama
 docker exec free-form-text-to-route-ollama-1 ollama list
 
 # Pull model manually
-docker exec free-form-text-to-route-ollama-1 ollama pull llama3.1:8b
+docker exec free-form-text-to-route-ollama-1 ollama pull llama3.1:8b-instruct-q4_K_M
 ```
 
 ### Out of Memory
 - Ensure you have at least 8GB RAM available
 - Close other applications if needed
-- Consider using a smaller model if necessary
+- Consider using CPU-only mode if GPU memory is limited
 
 ### Connection Issues
 - Verify Ollama is running: `curl http://localhost:11434/api/tags`
@@ -72,7 +73,7 @@ docker exec free-form-text-to-route-ollama-1 ollama pull llama3.1:8b
 
 To update the model:
 ```bash
-docker exec free-form-text-to-route-ollama-1 ollama pull llama3.1:8b
+docker exec free-form-text-to-route-ollama-1 ollama pull llama3.1:8b-instruct-q4_K_M
 ```
 
 ## 💡 Pro Tips

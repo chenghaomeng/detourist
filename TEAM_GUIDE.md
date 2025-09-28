@@ -9,12 +9,13 @@ This guide helps your 5-person team understand the project structure and develop
 **Focus**: Natural language processing and parameter extraction
 
 **Key Tasks**:
-- Implement `LLMExtractor.extract_parameters()` method
+- Implement two-step LLM extraction process
+- Integrate with Ollama + Llama 3.1 8B quantized model
 - Map user preferences to waypoint queries
 - Extract routing constraints from prompts
 - Handle edge cases and ambiguous inputs
 
-**Dependencies**: OpenAI API, prompt engineering
+**Dependencies**: Ollama, Llama 3.1 model, FAISS OSM tag search
 
 ### 2. Geocoding Developer
 **Module**: `backend/geocoding/`
@@ -70,6 +71,14 @@ This guide helps your 5-person team understand the project structure and develop
 
 ```bash
 # Each developer should run:
+git clone <repository-url>
+cd free-form-text-to-route
+
+# Start with Docker Compose (recommended)
+docker compose up -d
+./scripts/setup-ollama.sh
+
+# Or for local development:
 ./scripts/setup.sh
 cp .env.example .env
 # Add their specific API keys to .env
@@ -89,7 +98,7 @@ Each developer works on their assigned module:
 ```bash
 # Example for LLM extraction developer:
 cd backend/extraction/
-# Implement llm_extractor.py
+# Implement llm_extractor.py, llm_providers.py, faiss_osm_validator.py
 # Add tests
 # Update documentation
 ```
@@ -115,7 +124,7 @@ python -m uvicorn backend.api:app --reload
 # Test API endpoints
 curl -X POST "http://localhost:8000/generate-routes" \
   -H "Content-Type: application/json" \
-  -d '{"user_prompt": "Test prompt", "max_results": 3}'
+  -d '{"user_prompt": "Test prompt", "max_results": 3, "num_tags": 5}'
 ```
 
 ## 🧪 Testing Strategy
@@ -130,7 +139,7 @@ from backend.extraction.llm_extractor import LLMExtractor
 
 def test_extract_parameters():
     extractor = LLMExtractor("test_key")
-    result = extractor.extract_parameters("Go from A to B")
+    result = extractor.extract_parameters("Go from A to B", num_tags=5)
     assert result.origin == "A"
     assert result.destination == "B"
 ```
@@ -155,7 +164,8 @@ Test the web API:
 def test_generate_routes_endpoint():
     response = client.post("/generate-routes", json={
         "user_prompt": "Test",
-        "max_results": 3
+        "max_results": 3,
+        "num_tags": 5
     })
     assert response.status_code == 200
 ```
@@ -165,7 +175,9 @@ def test_generate_routes_endpoint():
 ```
 User Prompt
     ↓
-LLM Extractor → Extracted Parameters
+Two-Step LLM Extraction:
+  Step 1: Extract Preferences → FAISS OSM Search
+  Step 2: Extract Parameters with Candidates
     ↓
 Geocoder → Coordinates + Search Zone
     ↓
@@ -185,7 +197,7 @@ Each developer needs different API keys:
 
 ```bash
 # .env file structure:
-LLM_API_KEY=sk-your-openai-key
+LLM_API_KEY=sk-your-openai-key  # Reserved for future providers
 GEOCODING_API_KEY=AIza-your-google-key
 POI_API_KEY=AIza-your-places-key
 ROUTING_API_KEY=AIza-your-maps-key
@@ -198,8 +210,9 @@ Each module can have its own config:
 ```python
 # Example: backend/extraction/config.py
 EXTRACTION_CONFIG = {
-    'model': 'gpt-3.5-turbo',
-    'max_tokens': 1000,
+    'model': 'llama3.1:8b-instruct-q4_K_M',
+    'ollama_url': 'http://ollama:11434/api/generate',
+    'num_tags': 5,
     'temperature': 0.1
 }
 ```
@@ -217,8 +230,9 @@ cd frontend && npm run dev
 
 ### Production
 ```bash
-# Using Docker
-docker-compose up --build
+# Using Docker Compose (recommended)
+docker compose up --build -d
+./scripts/setup-ollama.sh
 
 # Or manual deployment
 # Backend
@@ -326,7 +340,8 @@ def rate_limit(calls_per_second=10):
 - [Leaflet Documentation](https://leafletjs.com/)
 
 ### APIs
-- [OpenAI API](https://platform.openai.com/docs)
+- [Ollama Documentation](https://ollama.ai/docs)
+- [Llama 3.1 Documentation](https://huggingface.co/meta-llama/Llama-3.1-8B)
 - [Google Maps API](https://developers.google.com/maps)
 - [Mapbox API](https://docs.mapbox.com/)
 - [CLIP Model](https://github.com/openai/CLIP)
