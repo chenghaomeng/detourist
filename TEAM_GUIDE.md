@@ -79,12 +79,18 @@ docker compose up -d
 ./scripts/setup-ollama.sh
 
 # Or for local development:
-./scripts/setup.sh
-cp .env.example .env
+# 1. Install Python dependencies
+poetry install
+
+# 2. Install frontend dependencies
+cd frontend
+npm install
+cd ..
+
+# 3. Create .env file with your API keys
 # Add their specific API keys to .env
 
 # Poetry commands for development:
-poetry install                    # Install all dependencies
 poetry add package-name           # Add new dependency
 poetry add --group dev package-name  # Add dev dependency
 poetry run command               # Run command in Poetry environment
@@ -197,7 +203,7 @@ Each developer needs different API keys:
 
 ```bash
 # .env file structure:
-LLM_API_KEY=sk-your-openai-key  # Reserved for future providers
+LLM_API_KEY=sk-your-openai-key  # Reserved for future providers (not used with Ollama)
 GEOCODING_API_KEY=AIza-your-google-key
 POI_API_KEY=AIza-your-places-key
 ROUTING_API_KEY=AIza-your-maps-key
