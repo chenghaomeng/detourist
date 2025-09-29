@@ -1,4 +1,4 @@
-# Free-form Text to Route
+# Detourist
 
 A web application that generates custom routes from natural language prompts, incorporating user preferences like scenic views, avoiding stairs, or specific landmarks.
 
