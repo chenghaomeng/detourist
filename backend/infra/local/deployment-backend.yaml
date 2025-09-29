@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: har-backend-deployment
+  namespace: har-local
+  labels:
+    app: har-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: har-backend
+  template:
+    metadata:
+      labels:
+        app: har-backend
+    spec:
+      containers:
+        - name: har-backend
+          image: har-backend:dev               # build locally: docker build -t har-backend:dev .
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000              
+          env:
+            - name: ALLOW_ORIGINS
+              value: "http://localhost:5173,https://detourist.com"
+            # stub creds; safe to keep for local
+            - name: LLM_API_KEY
+              value: "dev"
+            - name: GEOCODING_API_KEY
+              value: "dev"
+            - name: POI_API_KEY
+              value: "dev"
+            - name: ROUTING_API_KEY
+              value: "dev"
+            - name: CLIP_MODEL_PATH
+              value: "/models/clip"
+          readinessProbe:
+            httpGet:
+              path: /healthz                   # fast probe
+              port: 8000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz                   
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
