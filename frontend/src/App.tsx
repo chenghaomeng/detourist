@@ -1,28 +1,146 @@
-import React from 'react'
-import { Routes, Route } from 'react-router-dom'
-import { Container, AppBar, Toolbar, Typography, Box } from '@mui/material'
-import RouteGenerator from './components/RouteGenerator'
-import RouteResults from './components/RouteResults'
+import React, { useState } from 'react';
+import { PromptScreen } from './components/screens/PromptScreen';
+import { ProcessingScreen } from './components/screens/ProcessingScreen';
+import { ResultsScreen } from './components/screens/ResultsScreen';
+import { HandoffScreen } from './components/screens/HandoffScreen';
+import { NoScenicState, ConflictState } from './components/screens/ErrorStates';
+import { RoutePreferences, AppScreen } from './types/route';
+import { samplePreferences, sampleRouteResult } from './data/sampleData';
+// Backend API service available at: ./services/api
+// import { apiService } from './services/api';
+// To integrate with backend, replace mock data with apiService.generateRoutes() calls
 
-function App() {
-  return (
-    <Box sx={{ flexGrow: 1 }}>
-      <AppBar position="static">
-        <Toolbar>
-          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Free-form Text to Route
-          </Typography>
-        </Toolbar>
-      </AppBar>
+export default function App() {
+  const [currentScreen, setCurrentScreen] = useState<AppScreen>('prompt');
+  const [userPrompt, setUserPrompt] = useState('');
+  const [preferences, setPreferences] = useState<RoutePreferences>(samplePreferences);
+  
+  // Mock route generation logic
+  const generateRoute = () => {
+    // Simulate different outcomes based on preferences
+    if (!preferences.scenic && preferences.avoid) {
+      return 'conflict';
+    }
+    if (!preferences.scenic) {
+      return 'no-scenic';
+    }
+    return 'results';
+  };
+  
+  const handlePromptSubmit = (prompt: string) => {
+    setUserPrompt(prompt);
+    
+    // Parse prompt and update preferences (mock implementation)
+    const lowerPrompt = prompt.toLowerCase();
+    const updatedPreferences = { ...samplePreferences };
+    
+    if (lowerPrompt.includes('big sur')) {
+      updatedPreferences.destination = 'Big Sur, CA';
+    }
+    if (lowerPrompt.includes('monterey')) {
+      updatedPreferences.destination = 'Monterey, CA';
+    }
+    if (lowerPrompt.includes('napa')) {
+      updatedPreferences.destination = 'Napa, CA';
+    }
+    if (lowerPrompt.includes('avoid downtown')) {
+      updatedPreferences.avoid = 'Downtown';
+    }
+    if (lowerPrompt.includes('chill') || lowerPrompt.includes('calm') || lowerPrompt.includes('peaceful')) {
+      updatedPreferences.calm = true;
+    }
+    
+    setPreferences(updatedPreferences);
+    setCurrentScreen('processing');
+  };
+
+  const handleProcessingComplete = () => {
+    const nextScreen = generateRoute();
+    setCurrentScreen(nextScreen as AppScreen);
+  };
+  
+  const handleBackToPrompt = () => {
+    setCurrentScreen('prompt');
+  };
+  
+  const handleBackToResults = () => {
+    setCurrentScreen('results');
+  };
+  
+  const handleHandoff = () => {
+    setCurrentScreen('handoff');
+  };
+  
+  const handleRelaxAvoid = () => {
+    setPreferences({
+      ...preferences,
+      avoid: undefined
+    });
+    setCurrentScreen('results');
+  };
+  
+  const handleRemoveAvoid = () => {
+    setPreferences({
+      ...preferences,
+      avoid: undefined
+    });
+    setCurrentScreen('results');
+  };
+  
+  // Screen routing
+  switch (currentScreen) {
+    case 'prompt':
+      return <PromptScreen onNext={handlePromptSubmit} />;
       
-      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Routes>
-          <Route path="/" element={<RouteGenerator />} />
-          <Route path="/results" element={<RouteResults />} />
-        </Routes>
-      </Container>
-    </Box>
-  )
+    case 'processing':
+      return (
+        <ProcessingScreen
+          prompt={userPrompt}
+          preferences={preferences}
+          onComplete={handleProcessingComplete}
+        />
+      );
+      
+    case 'results':
+      return (
+        <ResultsScreen
+          preferences={preferences}
+          result={sampleRouteResult}
+          onBack={handleBackToPrompt}
+          onHandoff={handleHandoff}
+          onUpdatePreferences={setPreferences}
+        />
+      );
+      
+    case 'handoff':
+      return (
+        <HandoffScreen
+          preferences={preferences}
+          result={sampleRouteResult}
+          onBack={() => setCurrentScreen('results')}
+        />
+      );
+      
+    case 'no-scenic':
+      return (
+        <NoScenicState
+          preferences={preferences}
+          onBack={handleBackToResults}
+          onHandoff={handleHandoff}
+        />
+      );
+      
+    case 'conflict':
+      return (
+        <ConflictState
+          preferences={preferences}
+          onBack={handleBackToResults}
+          onRelaxAvoid={handleRelaxAvoid}
+          onRemoveAvoid={handleRemoveAvoid}
+        />
+      );
+      
+    default:
+      return <PromptScreen onNext={handlePromptSubmit} />;
+  }
 }
-
-export default App
