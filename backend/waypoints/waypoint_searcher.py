@@ -4,18 +4,16 @@ Waypoint search module for finding POIs within search zones.
 This module handles:
 1. Searching for POIs based on waypoint queries
 2. Filtering results by search zone boundaries
-3. Ranking waypoints by relevance and accessibility
+3. Ranking waypoints by relevance (tag+name similarity only)
 """
 
 from typing import List, Dict, Any, Tuple, Iterable, Optional
 from dataclasses import dataclass
 import time
-import math
 import re
 import requests
 
 from shapely.geometry import Point, Polygon
-from shapely.ops import unary_union
 
 from backend.geocoding.geocoder import SearchZone, Coordinates
 
@@ -30,8 +28,9 @@ class Waypoint:
     name: str
     coordinates: Coordinates
     category: str
-    relevance_score: float
+    relevance_score: float  # 0..10
     metadata: Dict[str, Any]
+    input_query: str  # the original query string that produced this waypoint
 
 
 class WaypointSearcher:
@@ -69,7 +68,7 @@ class WaypointSearcher:
             # Spatial filter (belt & suspenders), then convert to Waypoints
             elements_in = self._filter_by_zone(elements, search_zone)
             waypoints = self._convert_pois_to_waypoints(elements_in, q)
-            # Rank for this query
+            # Rank for this query (centrality removed; only tag+name similarity)
             ranked = self._rank_waypoints(
                 waypoints,
                 query=q,
@@ -77,9 +76,10 @@ class WaypointSearcher:
                 destination=search_zone.destination_isochrone.center,
             )
             all_waypoints.extend(ranked)
+            # Be polite to Overpass (shared resource)
             time.sleep(1.0)
 
-        # De-dupe by (name, lat, lon) keeping highest score
+        # De-dupe by (name, lat, lon) keeping highest score (query not included in dedupe key)
         dedup: Dict[Tuple[str, float, float], Waypoint] = {}
         for w in all_waypoints:
             key = (w.name, round(w.coordinates.latitude, 6), round(w.coordinates.longitude, 6))
@@ -188,6 +188,7 @@ class WaypointSearcher:
         return None
 
     def _convert_pois_to_waypoints(self, pois: List[Dict[str, Any]], query: str) -> List[Waypoint]:
+        """Turn Overpass elements into Waypoint dataclasses, retaining the input query."""
         out: List[Waypoint] = []
         for e in pois:
             tags = e.get("tags", {}) or {}
@@ -202,6 +203,7 @@ class WaypointSearcher:
                     category=self._category_from_tags(tags, query),
                     relevance_score=0.0,  # filled in ranking
                     metadata={"osm_id": e.get("id"), "osm_type": e.get("type"), "tags": tags},
+                    input_query=query,
                 )
             )
         return out
@@ -218,31 +220,30 @@ class WaypointSearcher:
         self,
         waypoints: List[Waypoint],
         query: str,
-        origin: Coordinates,
-        destination: Coordinates
+        origin: Coordinates,        # kept for API compatibility (ignored)
+        destination: Coordinates    # kept for API compatibility (ignored)
     ) -> List[Waypoint]:
         """
         Rank by:
-          - exact tag match to the provided query filter (since it's already pre-encoded),
-          - light name similarity to the query,
-          - centrality toward the midpoint of origin/destination.
-        """
-        mid = Coordinates(
-            latitude=(origin.latitude + destination.latitude) / 2.0,
-            longitude=(origin.longitude + destination.longitude) / 2.0,
-        )
-        od_dist = max(1.0, self._haversine_m(origin, destination))  # avoid zero
+          - exact tag match to the provided query filter (already pre-encoded),
+          - lightweight name similarity to the query.
+        Centrality is intentionally removed.
 
+        Final score is scaled to 0..10.
+        """
+        TAG_WEIGHT = 0.85
+        NAME_WEIGHT = 0.15
+
+        ranked: List[Waypoint] = []
         for w in waypoints:
             tags = w.metadata.get("tags", {})
-            tag_score = self._calculate_relevance_score(tags, query)
-            name_score = self._name_similarity_score(w.name, query)
-            # favor locations near the midpoint; normalize by half of route length
-            d_mid = self._haversine_m(w.coordinates, mid)
-            centrality = max(0.0, 1.0 - (d_mid / (0.5 * od_dist)))
-            w.relevance_score = round(0.6 * tag_score + 0.15 * name_score + 0.25 * centrality, 6)
+            tag_s = self._calculate_relevance_score(tags, query)     # 0..1
+            name_s = self._name_similarity_score(w.name, query)      # 0..1
+            score01 = TAG_WEIGHT * tag_s + NAME_WEIGHT * name_s      # 0..1
+            w.relevance_score = float(round(score01 * 10.0, 6))      # 0..10
+            ranked.append(w)
 
-        return sorted(waypoints, key=lambda w: w.relevance_score, reverse=True)
+        return sorted(ranked, key=lambda w: w.relevance_score, reverse=True)
 
     def _calculate_relevance_score(self, tags: Dict[str, Any], query: str) -> float:
         """
@@ -295,7 +296,7 @@ class WaypointSearcher:
         return None, None, "unknown"
 
     def _name_similarity_score(self, name: str, query: str) -> float:
-        """Tiny token overlap between name and query tokens."""
+        """Tiny token overlap between name and query tokens; returns 0..1."""
         if not name or not query:
             return 0.0
         name_tokens = {t for t in _tokenize(name)}
@@ -304,19 +305,6 @@ class WaypointSearcher:
             return 0.0
         overlap = len(name_tokens & query_tokens)
         return min(1.0, overlap / max(1, len(query_tokens)))
-
-    def _haversine_m(self, a: Coordinates, b: Coordinates) -> float:
-        """Distance in meters between two lat/lon points."""
-        R = 6371000.0
-        lat1 = math.radians(a.latitude)
-        lon1 = math.radians(a.longitude)
-        lat2 = math.radians(b.latitude)
-        lon2 = math.radians(b.longitude)
-        dlat = lat2 - lat1
-        dlon = lon2 - lon1
-        h = (math.sin(dlat / 2) ** 2 +
-             math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2)
-        return 2 * R * math.asin(math.sqrt(h))
 
     def _synthetic_name(self, element: Dict[str, Any], query: str) -> str:
         osm_type = element.get("type", "elem")

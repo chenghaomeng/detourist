@@ -1,6 +1,6 @@
 # tests/test_geocoder.py
 """
-Verbose tests for the Geocoder module using OSM-backed services.
+Verbose tests for Mapbox-backed Geocoder.
 
 Trip:
   Origin:      Times Square, New York, NY
@@ -9,10 +9,11 @@ Trip:
   max_additional_time: 10 minutes
 
 Notes:
-- Requires ORS_API_KEY for routing/isochrones tests. Geocoding works without it.
-- Isochrone API is rate-limited to ~20 requests/min. We enforce:
-    1) a sliding-window rate limiter (≤20 calls in any 60s),
-    2) an extra fixed sleep between ORS requests.
+- Requires GEOCODING_API_KEY for Mapbox (geocoding, directions, isochrones).
+- We add a small sliding-window limiter and a fixed delay before Mapbox calls to be gentle.
+- Run with:
+    export GEOCODING_API_KEY=pk.your_mapbox_token
+    pytest -vv -s tests/test_geocoder.py
 """
 
 import os
@@ -34,29 +35,29 @@ log = logging.getLogger("test_geocoder")
 ORIGIN_ADDRESS = "Times Square, New York, NY"
 DEST_ADDRESS = "Jersey City, NJ"
 TRANSPORT_MODE = "driving"
-MAX_ADDITIONAL_TIME = 10  # minutes (PER REQUEST)
+MAX_ADDITIONAL_TIME = 10  # minutes
 
 # Loose coordinate checks (approximate)
 TIMES_SQUARE_APPROX = Coordinates(latitude=40.7580, longitude=-73.9855)
 JERSEY_CITY_APPROX = Coordinates(latitude=40.7178, longitude=-74.0431)
-COORD_TOL = 0.03  # ~1–3 km tolerance near NYC
+COORD_TOL = 0.035  # ~ up to a few km tolerance near NYC
 
 # Time sanity caps
-MAX_REASONABLE_MINUTES = 180  # cap for base driving time
+MAX_REASONABLE_MINUTES_DRIVE = 180  # cap for base driving time
 
-# ORS limits & extra safety
-ISO_MAX_CALLS_PER_MIN = 20
-ADDITIONAL_DELAY_SECONDS = 3.5  # extra delay before each ORS request (isochrones & directions)
+# Mapbox politeness
+MAX_CALLS_PER_MIN = 100
+ADDITIONAL_DELAY_SECONDS = 0  # extra delay before each Mapbox request
 
 
 def _coords_close(a: Coordinates, b: Coordinates, tol: float = COORD_TOL) -> bool:
     return (abs(a.latitude - b.latitude) <= tol) and (abs(a.longitude - b.longitude) <= tol)
 
 
-def _require_ors_key() -> str:
-    key = os.getenv("ORS_API_KEY")
+def _require_mapbox_key() -> str:
+    key = os.getenv("GEOCODING_API_KEY")
     if not key:
-        pytest.skip("Skipping ORS-dependent tests: ORS_API_KEY env var not set.")
+        pytest.skip("Skipping Mapbox-dependent tests: GEOCODING_API_KEY env var not set.")
     return key
 
 
@@ -70,19 +71,23 @@ class RateLimiter:
 
     def wait(self):
         now = time.time()
-        # Remove timestamps older than window
         while self.calls and now - self.calls[0] >= self.window:
             self.calls.popleft()
         if len(self.calls) >= self.max_calls:
-            sleep_for = self.window - (now - self.calls[0]) + 0.05  # buffer
+            sleep_for = self.window - (now - self.calls[0]) + 0.05
             log.info(f"[RateLimiter] At limit ({self.max_calls}/{self.window}s). Sleeping {sleep_for:.2f}s…")
             time.sleep(max(0.0, sleep_for))
         self.calls.append(time.time())
 
 
+@pytest.mark.timeout(120)
 def test_geocode_address_times_square_and_jersey_city():
-    """Verbose integration-ish test against Nominatim."""
-    geocoder = Geocoder(api_key="dummy")  # ORS key not required for geocoding
+    """
+    Geocoding test using Mapbox.
+    Verifies we can resolve both endpoints and they are close to expected coordinates.
+    """
+    api_key = _require_mapbox_key()
+    geocoder = Geocoder(api_key=api_key)
 
     log.info("Geocoding origin: %s", ORIGIN_ADDRESS)
     origin = geocoder.geocode_address(ORIGIN_ADDRESS)
@@ -100,21 +105,24 @@ def test_geocode_address_times_square_and_jersey_city():
     )
 
 
+@pytest.mark.timeout(180)
 def test_shortest_travel_time_minutes_driving_with_delay(monkeypatch):
-    """Check base shortest travel time via ORS directions (verbose, delayed)."""
-    ors_key = _require_ors_key()
-    geocoder = Geocoder(api_key=ors_key)
+    """
+    Check base shortest travel time via Mapbox Directions (verbose, with delay).
+    """
+    api_key = _require_mapbox_key()
+    geocoder = Geocoder(api_key=api_key)
 
     # Wrap shortest_travel_time_minutes with limiter + fixed delay
-    limiter = RateLimiter(max_calls=ISO_MAX_CALLS_PER_MIN)
+    limiter = RateLimiter(max_calls=MAX_CALLS_PER_MIN)
     original_shortest = geocoder.shortest_travel_time_minutes
 
     def wrapped_shortest(origin, dest, mode="walking"):
         limiter.wait()
-        log.info("[Delay] Sleeping %.2fs before ORS directions request…", ADDITIONAL_DELAY_SECONDS)
+        log.info("[Delay] Sleeping %.2fs before Mapbox directions…", ADDITIONAL_DELAY_SECONDS)
         time.sleep(ADDITIONAL_DELAY_SECONDS)
         out = original_shortest(origin, dest, mode)
-        log.info(" → ORS directions result: %d minutes", out)
+        log.info(" → Mapbox directions result: %d minutes", out)
         return out
 
     monkeypatch.setattr(geocoder, "shortest_travel_time_minutes", wrapped_shortest)
@@ -125,46 +133,46 @@ def test_shortest_travel_time_minutes_driving_with_delay(monkeypatch):
 
     log.info("Fetching shortest driving time Times Square → Jersey City…")
     base_minutes = geocoder.shortest_travel_time_minutes(origin, dest, TRANSPORT_MODE)
+    log.info(" → Base shortest time: %d minutes", base_minutes)
 
     assert base_minutes > 0, "Shortest travel time should be positive."
-    assert base_minutes < MAX_REASONABLE_MINUTES, (
+    assert base_minutes < MAX_REASONABLE_MINUTES_DRIVE, (
         f"Unreasonably large base travel time for driving: {base_minutes} min"
     )
 
 
+@pytest.mark.timeout(900)
 def test_create_search_zone_union_of_overlaps_with_rate_limit_and_delay(monkeypatch):
     """
-    Full pipeline with verbose logging, a rate limiter, and an extra fixed delay around ORS calls:
+    Full pipeline with verbose logging, a rate limiter, and an extra fixed delay around Mapbox calls:
       1) Geocode origin/destination
       2) Compute base shortest time (driving)
       3) Plan the grid search of (origin_min, dest_min) pairs where their sum == base + 10
       4) Wrap BOTH directions and isochrone calls to enforce ≤20/min + fixed delay
       5) Build the union-of-overlaps search zone and validate
     """
-    ors_key = _require_ors_key()
-    geocoder = Geocoder(api_key=ors_key)
+    api_key = _require_mapbox_key()
+    geocoder = Geocoder(api_key=api_key)
 
-    # ---- Wrap BOTH ORS methods with limiter + fixed delay ----
-    limiter = RateLimiter(max_calls=ISO_MAX_CALLS_PER_MIN)
+    # ---- Wrap BOTH Mapbox methods with limiter + fixed delay ----
+    limiter = RateLimiter(max_calls=MAX_CALLS_PER_MIN)
 
     original_shortest = geocoder.shortest_travel_time_minutes
     original_create_iso = geocoder.create_isochrone
 
     def wrapped_shortest(origin, dest, mode="walking"):
         limiter.wait()
-        log.info("[Delay] Sleeping %.2fs before ORS directions request…", ADDITIONAL_DELAY_SECONDS)
+        log.info("[Delay] Sleeping %.2fs before Mapbox directions…", ADDITIONAL_DELAY_SECONDS)
         time.sleep(ADDITIONAL_DELAY_SECONDS)
         return original_shortest(origin, dest, mode)
 
     def wrapped_create_iso(center, minutes, mode="walking"):
         limiter.wait()
-        log.info(
-            "[Delay] Sleeping %.2fs before ORS isochrone request (min=%s)…",
-            ADDITIONAL_DELAY_SECONDS, minutes
-        )
+        log.info("[Delay] Sleeping %.2fs before Mapbox isochrone (min=%s)…",
+                 ADDITIONAL_DELAY_SECONDS, minutes)
         time.sleep(ADDITIONAL_DELAY_SECONDS)
         iso = original_create_iso(center, minutes, mode)
-        log.info(" → Isochrone(min=%s) returned ring with %d points", minutes, len(iso.polygon))
+        log.info(" → Isochrone(min=%s) ring has %d points", minutes, len(iso.polygon))
         return iso
 
     monkeypatch.setattr(geocoder, "shortest_travel_time_minutes", wrapped_shortest)
@@ -185,6 +193,7 @@ def test_create_search_zone_union_of_overlaps_with_rate_limit_and_delay(monkeypa
 
     # Replicate the split schedule Geocoder uses to provide visibility/estimates
     if base_minutes > 60:
+        # mirrors geocoder._evenly_spaced_minutes(max_travel_time, max_count=20)
         n = max(2, min(20, max_travel_time + 1))
         origin_minutes_list = [int(round(i * (max_travel_time / (n - 1)))) for i in range(n)]
     else:
@@ -232,5 +241,6 @@ def test_create_search_zone_union_of_overlaps_with_rate_limit_and_delay(monkeypa
 
 
 if __name__ == "__main__":
+    # Allow running directly: python tests/test_geocoder.py
     import sys
     sys.exit(pytest.main([__file__, "-vv", "-s"]))
