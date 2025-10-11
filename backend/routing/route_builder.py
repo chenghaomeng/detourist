@@ -107,7 +107,7 @@ class RouteBuilder:
         constraints: Dict[str, bool],
     ) -> Route:
         """Build a single route through one waypoint using ORS directions."""
-        profile = self._ors_profile(constraints.get("transport_mode", "driving"))
+        profile = self._ors_profile(constraints.get("transport_mode", "driving")) # type: ignore
         options = self._apply_constraints(constraints)  # {"options": {...}} or {}
 
         seg1 = self._directions_segment(origin, waypoint.coordinates, profile, options)
