@@ -38,7 +38,7 @@ def test_build_route_driving_with_constraints_and_delay():
         "avoid_tolls": True,
         "avoid_ferries": True,
         "extra_delay_seconds": 3.0,
-    }
+    } # type: ignore
 
     routes = rb.build_routes(origin, destination, [waypoint], constraints)
     assert len(routes) == 1
@@ -72,7 +72,7 @@ def test_build_route_walking_avoid_stairs():
         "transport_mode": "walking",
         "avoid_stairs": True,
         "extra_delay_seconds": 2.0,
-    }
+    } # type: ignore
 
     routes = rb.build_routes(origin, destination, [waypoint], constraints)
     assert len(routes) == 1
