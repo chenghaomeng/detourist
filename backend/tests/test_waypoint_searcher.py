@@ -1,25 +1,31 @@
+# scripts/test_waypoint_searcher.py
 """
-Verbose tests for Overpass-backed WaypointSearcher contained in a single script.
+Verbose tests for Overpass-backed WaypointSearcher (tag+name relevance only).
 
-We intentionally avoid ORS/isochrone API calls by crafting a SearchZone whose
-intersection polygon covers Lower Manhattan (rich in OSM POIs). This keeps the
-test fast and avoids other service rate limits.
+We avoid ORS/isochrone API calls by crafting a SearchZone whose
+intersection polygon covers Lower Manhattan (rich in OSM POIs). This keeps tests
+fast and avoids other service rate limits.
 
-Queries:
-  - leisure=park
-  - amenity=school
-  - tourism=viewpoint
+Example queries (as requested): viewpoints, waterfront, parks
+Encoded for Overpass:
+  - viewpoints -> tourism=viewpoint
+  - waterfront -> natural=water
+  - parks      -> leisure=park
+
+Run directly:
+    python scripts/test_waypoint_searcher.py
+
+Or with pytest (equivalent):
+    pytest -vv -s scripts/test_waypoint_searcher.py
 """
 
-import math
-import logging
 import sys
+import logging
 from typing import List
 
 import pytest
 from shapely.geometry import Polygon, Point
 
-# Project imports (adjusted path)
 from backend.waypoints.waypoint_searcher import WaypointSearcher, Waypoint
 from backend.geocoding.geocoder import Coordinates, Isochrone, SearchZone
 
@@ -27,7 +33,7 @@ from backend.geocoding.geocoder import Coordinates, Isochrone, SearchZone
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("test_waypoint_searcher")
 
-
+# ----- Helpers to build a fixed SearchZone -----
 def _lower_manhattan_zone() -> SearchZone:
     """
     Construct a SearchZone whose intersection polygon is a rectangle roughly covering
@@ -60,41 +66,47 @@ def _lower_manhattan_zone() -> SearchZone:
         intersection_polygon=ring,
     )
 
+# ----- Tests -----
 
-def test_search_waypoints_lower_manhattan_verbose():
+@pytest.mark.timeout(300)
+def test_search_waypoints_lower_manhattan_verbose_and_scores():
     """
     Integration-like test hitting Overpass API with a fixed polygon.
     Validates:
-      - We get non-empty results for rich tags
+      - Non-empty results for rich tags
       - Every waypoint is inside the polygon
-      - Scores are in [0, 1] and sorting is descending
+      - Relevance scores are in [0, 10] and sorting is descending
+      - Final list of waypoints and scores are printed for inspection
     """
     zone = _lower_manhattan_zone()
-    searcher = WaypointSearcher()  # UA set internally to berkeley-detourist/1.0
+    searcher = WaypointSearcher()  # Uses Overpass; no API key required
 
-    queries: List[str] = ["leisure=park", "amenity=school", "tourism=viewpoint"]
-    log.info("Using queries: %s", queries)
+    # Example queries requested: viewpoints, waterfront, parks
+    # Encoded to OSM filters for Overpass:
+    queries: List[str] = ["tourism=viewpoint", "natural=water", "leisure=park"]
+    log.info("Using queries (viewpoints, waterfront, parks): %s", queries)
 
-    # Run search
     waypoints = searcher.search_waypoints(zone, waypoint_queries=queries)
 
     log.info("Total waypoints returned: %d", len(waypoints))
-    # Show top 10 for debugging
-    for i, w in enumerate(waypoints[:10], start=1):
+    # Display ALL waypoints (name, category, coords, score)
+    for i, w in enumerate(waypoints, start=1):
+        tags_str = str(w.metadata.get("tags", {}))
         log.info(
-            "[%02d] %.3f  %-30s  %-18s  (%.6f, %.6f)",
+            "[%03d] score=%5.2f  name=%-40s  category=%-20s  (%.6f, %.6f)  tags=%s%s",
             i,
             w.relevance_score,
-            (w.name or "<unnamed>")[:30],
+            (w.name or "<unnamed>")[:40],
             w.category,
             w.coordinates.latitude,
             w.coordinates.longitude,
+            tags_str[:120],
+            "…" if len(tags_str) > 120 else "",
         )
 
     # Basic sanity
     assert isinstance(waypoints, list)
-    # Expect at least *some* POIs in Lower Manhattan for these tags
-    assert len(waypoints) > 0, "Expected some POIs for park/school/viewpoint in Lower Manhattan."
+    assert len(waypoints) > 0, "Expected some POIs for viewpoint/water/park in Lower Manhattan."
 
     # Build polygon for containment checks
     poly = Polygon([(c.longitude, c.latitude) for c in zone.intersection_polygon])
@@ -103,8 +115,8 @@ def test_search_waypoints_lower_manhattan_verbose():
     # Validate each result
     prev_score = float("inf")
     for w in waypoints:
-        # Scores in [0, 1]
-        assert 0.0 <= w.relevance_score <= 1.0, f"Score out of range for {w.name}: {w.relevance_score}"
+        # Scores in [0, 10]
+        assert 0.0 <= w.relevance_score <= 10.0, f"Score out of range for {w.name}: {w.relevance_score}"
         # Sorted descending
         assert w.relevance_score <= prev_score + 1e-9, "Waypoints not sorted by descending relevance."
         prev_score = w.relevance_score
@@ -116,19 +128,22 @@ def test_search_waypoints_lower_manhattan_verbose():
         # Category present
         assert isinstance(w.category, str) and len(w.category) > 0
 
-    # Spot-check that we see a mix of categories among top results
-    top_cats = {w.category.split("=")[0] if "=" in w.category else w.category for w in waypoints[:10]}
-    log.info("Top categories observed among first 10: %s", sorted(top_cats))
-    assert any(k in top_cats for k in ("leisure", "amenity", "tourism")), "Unexpected categories in top results."
+    # Spot-check that we see expected top-level keys among top categories
+    top_cats = {w.category.split("=")[0] if "=" in w.category else w.category for w in waypoints[:15]}
+    log.info("Top categories observed among first 15: %s", sorted(top_cats))
+    assert any(k in top_cats for k in ("tourism", "natural", "leisure")), "Unexpected categories in top results."
 
 
-def test_single_query_behaviour_and_deduplication():
+@pytest.mark.timeout(300)
+def test_single_query_dedup_and_pretty_print():
     """
     Focused test on one tag to ensure stable behavior and deduplication.
+    Prints the top 20 waypoints with full dataclass repr + score.
     """
     zone = _lower_manhattan_zone()
     searcher = WaypointSearcher()
 
+    # Use 'parks' example specifically
     query = ["leisure=park"]
     res = searcher.search_waypoints(zone, query)
 
@@ -142,7 +157,15 @@ def test_single_query_behaviour_and_deduplication():
         assert key not in seen, f"Duplicate waypoint encountered: {key}"
         seen.add(key)
 
+    # Pretty print top 20 with full repr and numeric score
+    log.info("Top 20 parks (full objects):")
+    for i, w in enumerate(res[:20], start=1):
+        log.info("[%02d] score=%5.2f  %r", i, w.relevance_score, w)
+
 
 if __name__ == "__main__":
-    import sys
+    # Allow running directly:
+    # - python scripts/test_waypoint_searcher.py
+    # Or via pytest:
+    # - pytest -vv -s scripts/test_waypoint_searcher.py
     sys.exit(pytest.main([__file__, "-vv", "-s"]))

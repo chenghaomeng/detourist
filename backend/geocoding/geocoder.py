@@ -1,15 +1,17 @@
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
 import json
-import time
 import math
 import requests
 from shapely.geometry import shape, Polygon, MultiPolygon, Point
 from shapely.ops import unary_union
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-ORS_ISOCHRONE_URL = "https://api.openrouteservice.org/v2/isochrones"
-ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions"
+# ---------------- Mapbox endpoints ----------------
+MAPBOX_GEOCODE_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places"
+MAPBOX_DIRECTIONS_URL = "https://api.mapbox.com/directions/v5/mapbox"
+MAPBOX_ISOCHRONE_URL = "https://api.mapbox.com/isochrone/v1/mapbox"
+
+USER_AGENT = "berkeley-detourist/1.0 (berkeley.edu)"
 
 
 @dataclass
@@ -33,84 +35,108 @@ class SearchZone:
 
 
 class Geocoder:
-    """Geocoding, routing, and isochrone creation (OSM-based)."""
+    """Geocoding, routing, and isochrone creation (Mapbox)."""
 
-    def __init__(self, api_key: str, user_agent: str = "berkeley-detourist/1.0 (berkeley.edu)"):
+    def __init__(self, api_key: str, user_agent: str = USER_AGENT):
         """
-        api_key:      openrouteservice API key (free tier OK)
-        user_agent:   required descriptive UA for Nominatim
+        api_key:      Mapbox access token (store as GEOCODING_API_KEY in .env)
+        user_agent:   used for HTTP requests
         """
         self.api_key = api_key
         self._ua = user_agent
+        # cache: (lat, lon, minutes, profile) -> shapely Polygon/MultiPolygon
         self._iso_cache: Dict[Tuple[float, float, int, str], Polygon | MultiPolygon] = {}
+        self._session = requests.Session()
+        self._session.headers.update({"User-Agent": self._ua})
 
-    # ---------------- Geocoding (Nominatim) ----------------
+    # ---------------- Geocoding (Mapbox) ----------------
     def geocode_address(self, address: str) -> Coordinates:
-        params = {"q": address, "format": "jsonv2", "limit": 1}
-        headers = {"User-Agent": self._ua}
-        r = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=15)
+        """
+        Convert address string to coordinates using Mapbox Geocoding.
+        """
+        url = f"{MAPBOX_GEOCODE_URL}/{requests.utils.quote(address)}.json"
+        params = {
+            "access_token": self.api_key,
+            "limit": 1,
+            # You can add "proximity" or "country" here if you want to bias results
+        }
+        r = self._session.get(url, params=params, timeout=20)
         r.raise_for_status()
         data = r.json()
-        if not data:
+        feats = data.get("features", [])
+        if not feats:
             raise ValueError(f"Address not found: {address}")
-        time.sleep(1)
-        return Coordinates(latitude=float(data[0]["lat"]), longitude=float(data[0]["lon"]))
+        # Mapbox center is [lon, lat]
+        lon, lat = feats[0]["center"]
+        return Coordinates(latitude=float(lat), longitude=float(lon))
 
-    # ---------------- Routing (ORS Directions) ----------------
-    def _ors_profile(self, transport_mode: str) -> str:
+    # ---------------- Routing (Mapbox Directions) ----------------
+    def _mb_profile(self, transport_mode: str) -> str:
+        # Mapbox profiles: driving | walking | cycling
         return {
-            "walking": "foot-walking",
-            "driving": "driving-car",
-            "cycling": "cycling-regular",
-        }.get(transport_mode, "foot-walking")
+            "walking": "walking",
+            "driving": "driving",
+            "cycling": "cycling",
+        }.get(transport_mode, "walking")
 
     def shortest_travel_time_minutes(
         self, origin: Coordinates, destination: Coordinates, transport_mode: str = "walking"
     ) -> int:
-        """Shortest travel time (minutes) using ORS directions."""
-        profile = self._ors_profile(transport_mode)
-        url = f"{ORS_DIRECTIONS_URL}/{profile}/geojson"
-        headers = {"Authorization": self.api_key, "Content-Type": "application/json"}
-        payload = {
-            "coordinates": [
-                [origin.longitude, origin.latitude],
-                [destination.longitude, destination.latitude],
-            ],
-            "instructions": False,
+        """
+        Shortest travel time (minutes) using Mapbox Directions.
+        """
+        profile = self._mb_profile(transport_mode)
+        coords = f"{origin.longitude},{origin.latitude};{destination.longitude},{destination.latitude}"
+        url = f"{MAPBOX_DIRECTIONS_URL}/{profile}/{coords}"
+        params = {
+            "access_token": self.api_key,
+            "alternatives": "false",
+            "overview": "false",     # we only need duration
+            "geometries": "geojson", # harmless even with overview=false
         }
-        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+        resp = self._session.get(url, params=params, timeout=30)
         resp.raise_for_status()
-        gj = resp.json()
-        if not gj.get("features"):
+        data = resp.json()
+        routes = data.get("routes", [])
+        if not routes:
             raise RuntimeError("Directions API returned no route.")
-        seconds = gj["features"][0]["properties"]["summary"]["duration"]
+        seconds = float(routes[0].get("duration", 0.0))
         return max(0, int(round(seconds / 60.0)))
 
-    # ---------------- Isochrones (ORS) ----------------
+    # ---------------- Isochrones (Mapbox) ----------------
     def create_isochrone(
         self, center: Coordinates, travel_time_minutes: int, transport_mode: str = "walking"
     ) -> Isochrone:
-        """Exterior ring (largest shell) of an ORS isochrone."""
-        profile = self._ors_profile(transport_mode)
+        """
+        Exterior ring (largest shell) of a Mapbox Isochrone for a single contour in minutes.
+        """
+        profile = self._mb_profile(transport_mode)
         key = (round(center.latitude, 6), round(center.longitude, 6), int(travel_time_minutes), profile)
 
         if key in self._iso_cache:
             geom = self._iso_cache[key]
         else:
-            url = f"{ORS_ISOCHRONE_URL}/{profile}"
-            headers = {"Authorization": self.api_key, "Content-Type": "application/json"}
-            payload = {
-                "locations": [[center.longitude, center.latitude]],
-                "range": [max(0, int(travel_time_minutes) * 60)],
-                "range_type": "time",
+            url = f"{MAPBOX_ISOCHRONE_URL}/{profile}/{center.longitude},{center.latitude}"
+            params = {
+                "access_token": self.api_key,
+                "contours_minutes": int(max(0, travel_time_minutes)),
+                "polygons": "true",
+                # You can tune these if desired:
+                # "denoise": 1.0,
+                # "generalize": 0,
             }
-            resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
+            resp = self._session.get(url, params=params, timeout=30)
             resp.raise_for_status()
             gj = resp.json()
             feats = gj.get("features", [])
             if not feats:
-                raise RuntimeError("Isochrone generation returned no features.")
-            geom = unary_union([shape(f["geometry"]) for f in feats]).buffer(0)
+                # If minutes == 0, mapbox may return empty; treat as tiny buffer at the center
+                pt = Point(center.longitude, center.latitude)
+                geom = pt.buffer(1e-9)
+            else:
+                # union polygons (usually a single feature)
+                geoms = [shape(f["geometry"]) for f in feats]
+                geom = unary_union(geoms).buffer(0)
             self._iso_cache[key] = geom
 
         if isinstance(geom, Polygon):
@@ -145,9 +171,7 @@ class Geocoder:
         else:
             combos = list(range(0, max_travel_time + 1, 5))
 
-        # collect overlaps (as shapely geoms)
         overlaps: List[Polygon | MultiPolygon] = []
-        # keep one representative pair to return in dataclass
         repr_origin_min = combos[len(combos) // 2]
         repr_dest_min = max_travel_time - repr_origin_min
 
@@ -161,14 +185,17 @@ class Geocoder:
 
         union_geom = self._union_areas(overlaps)
 
-        # convert union to exterior ring for dataclass
         if union_geom.is_empty:
             intersection_coords: List[Coordinates] = []
         elif isinstance(union_geom, Polygon):
-            intersection_coords = [Coordinates(latitude=lat, longitude=lon) for lon, lat in union_geom.exterior.coords]
+            intersection_coords = [
+                Coordinates(latitude=lat, longitude=lon) for lon, lat in union_geom.exterior.coords
+            ]
         else:
             largest = max(union_geom.geoms, key=lambda g: g.area)
-            intersection_coords = [Coordinates(latitude=lat, longitude=lon) for lon, lat in largest.exterior.coords]
+            intersection_coords = [
+                Coordinates(latitude=lat, longitude=lon) for lon, lat in largest.exterior.coords
+            ]
 
         origin_iso = self.create_isochrone(origin, repr_origin_min, transport_mode)
         dest_iso = self.create_isochrone(destination, repr_dest_min, transport_mode)
