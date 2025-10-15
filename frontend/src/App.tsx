@@ -1,146 +1,107 @@
-import React, { useState } from 'react';
-import { PromptScreen } from './components/screens/PromptScreen';
-import { ProcessingScreen } from './components/screens/ProcessingScreen';
-import { ResultsScreen } from './components/screens/ResultsScreen';
-import { HandoffScreen } from './components/screens/HandoffScreen';
-import { NoScenicState, ConflictState } from './components/screens/ErrorStates';
-import { RoutePreferences, AppScreen } from './types/route';
-import { samplePreferences, sampleRouteResult } from './data/sampleData';
-// Backend API service available at: ./services/api
-// import { apiService } from './services/api';
-// To integrate with backend, replace mock data with apiService.generateRoutes() calls
+import { SemanticSearchBar } from "./components/SemanticSearchBar";
+import { SemanticMapView } from "./components/SemanticMapView";
+import { NaturalSearchFlow } from "./components/NaturalSearchFlow";
+import { LeftSidebar } from "./components/LeftSidebar";
+import { useState } from "react";
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<AppScreen>('prompt');
-  const [userPrompt, setUserPrompt] = useState('');
-  const [preferences, setPreferences] = useState<RoutePreferences>(samplePreferences);
-  
-  // Mock route generation logic
-  const generateRoute = () => {
-    // Simulate different outcomes based on preferences
-    if (!preferences.scenic && preferences.avoid) {
-      return 'conflict';
-    }
-    if (!preferences.scenic) {
-      return 'no-scenic';
-    }
-    return 'results';
-  };
-  
-  const handlePromptSubmit = (prompt: string) => {
-    setUserPrompt(prompt);
-    
-    // Parse prompt and update preferences (mock implementation)
-    const lowerPrompt = prompt.toLowerCase();
-    const updatedPreferences = { ...samplePreferences };
-    
-    if (lowerPrompt.includes('big sur')) {
-      updatedPreferences.destination = 'Big Sur, CA';
-    }
-    if (lowerPrompt.includes('monterey')) {
-      updatedPreferences.destination = 'Monterey, CA';
-    }
-    if (lowerPrompt.includes('napa')) {
-      updatedPreferences.destination = 'Napa, CA';
-    }
-    if (lowerPrompt.includes('avoid downtown')) {
-      updatedPreferences.avoid = 'Downtown';
-    }
-    if (lowerPrompt.includes('chill') || lowerPrompt.includes('calm') || lowerPrompt.includes('peaceful')) {
-      updatedPreferences.calm = true;
-    }
-    
-    setPreferences(updatedPreferences);
-    setCurrentScreen('processing');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isNaturalSearch, setIsNaturalSearch] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  const handleSearchChange = (query: string) => {
+    setSearchQuery(query);
   };
 
-  const handleProcessingComplete = () => {
-    const nextScreen = generateRoute();
-    setCurrentScreen(nextScreen as AppScreen);
+  const handleSearchSubmit = (query: string) => {
+    if (query.trim()) {
+      setIsSidebarOpen(true);
+    }
   };
-  
-  const handleBackToPrompt = () => {
-    setCurrentScreen('prompt');
+
+  const handleNaturalSearchToggle = () => {
+    setIsNaturalSearch(!isNaturalSearch);
   };
-  
-  const handleBackToResults = () => {
-    setCurrentScreen('results');
+
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
   };
-  
-  const handleHandoff = () => {
-    setCurrentScreen('handoff');
-  };
-  
-  const handleRelaxAvoid = () => {
-    setPreferences({
-      ...preferences,
-      avoid: undefined
-    });
-    setCurrentScreen('results');
-  };
-  
-  const handleRemoveAvoid = () => {
-    setPreferences({
-      ...preferences,
-      avoid: undefined
-    });
-    setCurrentScreen('results');
-  };
-  
-  // Screen routing
-  switch (currentScreen) {
-    case 'prompt':
-      return <PromptScreen onNext={handlePromptSubmit} />;
+
+  return (
+    <div 
+      className="bg-white relative w-full h-screen overflow-hidden" 
+      data-name="Natural Search Maps App"
+      style={{ minHeight: '100vh' }}
+    >
+      {/* Left Sidebar */}
+      <LeftSidebar onMenuClick={toggleSidebar} />
+
+      {/* Map View */}
+      <SemanticMapView searchQuery={searchQuery} isNaturalSearch={isNaturalSearch} />
       
-    case 'processing':
-      return (
-        <ProcessingScreen
-          prompt={userPrompt}
-          preferences={preferences}
-          onComplete={handleProcessingComplete}
+      {/* Search Bar Overlay */}
+      <div className={`absolute box-border content-stretch flex flex-col gap-[10px] h-full items-start py-[28px] top-0 transition-all duration-300 ${
+        isSidebarOpen ? 'left-[534px] w-[calc(100%-534px-24px)] px-[24px]' : 'left-[96px] w-[calc(100%-96px-24px)] px-0'
+      }`}>
+        <SemanticSearchBar 
+          onSearchChange={handleSearchChange}
+          onSearchSubmit={handleSearchSubmit}
+          isNaturalSearch={isNaturalSearch}
+          onNaturalSearchToggle={handleNaturalSearchToggle}
         />
-      );
-      
-    case 'results':
-      return (
-        <ResultsScreen
-          preferences={preferences}
-          result={sampleRouteResult}
-          onBack={handleBackToPrompt}
-          onHandoff={handleHandoff}
-          onUpdatePreferences={setPreferences}
-        />
-      );
-      
-    case 'handoff':
-      return (
-        <HandoffScreen
-          preferences={preferences}
-          result={sampleRouteResult}
-          onBack={() => setCurrentScreen('results')}
-        />
-      );
-      
-    case 'no-scenic':
-      return (
-        <NoScenicState
-          preferences={preferences}
-          onBack={handleBackToResults}
-          onHandoff={handleHandoff}
-        />
-      );
-      
-    case 'conflict':
-      return (
-        <ConflictState
-          preferences={preferences}
-          onBack={handleBackToResults}
-          onRelaxAvoid={handleRelaxAvoid}
-          onRemoveAvoid={handleRemoveAvoid}
-        />
-      );
-      
-    default:
-      return <PromptScreen onNext={handlePromptSubmit} />;
-  }
+      </div>
+
+      {/* Sidebar Panel */}
+      <div className={`absolute bg-white h-full left-[72px] top-0 w-[462px] transition-transform duration-300 ${
+        isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      }`} data-name="Container">
+        <div className="box-border content-stretch flex flex-col h-full items-start overflow-clip pl-0 pr-px py-0 relative rounded-[inherit] w-[462px]">
+          {/* Header */}
+          <div className="h-[69px] relative shrink-0 w-[461px]" data-name="Container">
+            <div aria-hidden="true" className="absolute border-[0px_0px_1px] border-gray-200 border-solid inset-0 pointer-events-none" />
+            <div className="bg-clip-padding border-0 border-[transparent] border-solid box-border content-stretch flex h-[69px] items-center justify-between pb-px pt-0 px-[16px] relative w-[461px]">
+              <div className="h-[44px] relative shrink-0 w-[253.875px]" data-name="Container">
+                <div className="bg-clip-padding border-0 border-[transparent] border-solid box-border content-stretch flex flex-col h-[44px] items-start relative w-[253.875px]">
+                  <div className="h-[28px] relative shrink-0 w-full" data-name="Heading 1">
+                    <p className="absolute font-['Inter:Medium',_sans-serif] font-medium leading-[28px] left-0 not-italic text-[#101828] text-[18px] text-nowrap top-0 tracking-[-0.4395px] whitespace-pre">Natural Search Routing</p>
+                  </div>
+                  <div className="h-[16px] relative shrink-0 w-full" data-name="Paragraph">
+                    <p className="absolute font-['Inter:Regular',_sans-serif] font-normal leading-[16px] left-0 not-italic text-[#4a5565] text-[12px] text-nowrap top-px whitespace-pre">Describe your drive, not just your destination</p>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={toggleSidebar}
+                className="relative rounded-[1.67772e+07px] shrink-0 size-[32px] hover:bg-gray-100 transition-colors"
+                data-name="Button"
+              >
+                <div className="bg-clip-padding border-0 border-[transparent] border-solid box-border content-stretch flex flex-col items-start pb-0 pt-[8px] px-[8px] relative size-[32px]">
+                  <div className="h-[16px] overflow-clip relative shrink-0 w-full" data-name="Icon">
+                    <div className="absolute inset-1/4" data-name="Vector">
+                      <div className="absolute inset-[-8.33%]">
+                        <svg className="block size-full" fill="none" preserveAspectRatio="none" viewBox="0 0 10 10">
+                          <path d="M1 9L9 1M1 1L9 9" id="Vector" stroke="var(--stroke-0, #4A5565)" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.33333" />
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="basis-0 grow min-h-px min-w-px relative shrink-0 w-[461px]" data-name="Container">
+            <div className="bg-clip-padding border-0 border-[transparent] border-solid box-border content-stretch flex flex-col h-full items-start overflow-y-auto relative rounded-[inherit] w-[461px]">
+              <NaturalSearchFlow 
+                searchQuery={searchQuery} 
+                isNaturalSearch={isNaturalSearch} 
+              />
+            </div>
+          </div>
+        </div>
+        <div aria-hidden="true" className="absolute border-[0px_1px_0px_0px] border-gray-200 border-solid inset-0 pointer-events-none" />
+      </div>
+    </div>
+  );
 }
