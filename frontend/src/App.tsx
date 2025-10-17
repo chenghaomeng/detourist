@@ -40,7 +40,7 @@ export default function App() {
       <SemanticMapView searchQuery={searchQuery} isNaturalSearch={isNaturalSearch} />
       
       {/* Search Bar Overlay */}
-      <div className={`absolute box-border content-stretch flex flex-col gap-[10px] h-full items-start py-[28px] top-0 transition-all duration-300 ${
+      <div className={`absolute box-border flex flex-col gap-[10px] items-start py-[28px] top-0 transition-all duration-300 z-10 ${
         isSidebarOpen ? 'left-[534px] w-[calc(100%-534px-24px)] px-[24px]' : 'left-[96px] w-[calc(100%-96px-24px)] px-0'
       }`}>
         <SemanticSearchBar 
