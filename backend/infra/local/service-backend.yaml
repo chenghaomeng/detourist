@@ -10,7 +10,7 @@ spec:
   selector:
     app: har-backend
   ports:
-    - port: 8080
-      targetPort: 8080
-      nodePort: 30080
+    - port: 8000        # Service port inside cluster
+      targetPort: 8000  # Pod containerPort
+      nodePort: 30080   # Host port exposed by Minikube
       protocol: TCP

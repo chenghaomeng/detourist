@@ -1,5 +1,8 @@
+# backend/geocoding/geocoder.py
+from __future__ import annotations
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass
+import os
 import json
 import math
 import requests
@@ -13,12 +16,14 @@ MAPBOX_ISOCHRONE_URL = "https://api.mapbox.com/isochrone/v1/mapbox"
 
 USER_AGENT = "berkeley-detourist/1.0 (berkeley.edu)"
 
+# Hard cap per Mapbox isochrone request. Can override with env:
+#   MB_ISO_MAX_MIN=60 (recommended)
+ISO_MAX_MINUTES = int(os.getenv("MB_ISO_MAX_MIN", "60"))
 
 @dataclass
 class Coordinates:
     latitude: float
     longitude: float
-
 
 @dataclass
 class Isochrone:
@@ -26,13 +31,11 @@ class Isochrone:
     travel_time_minutes: int
     polygon: List[Coordinates]  # exterior ring (lat, lon)
 
-
 @dataclass
 class SearchZone:
     origin_isochrone: Isochrone
     destination_isochrone: Isochrone
     intersection_polygon: List[Coordinates]  # exterior of union of overlaps
-
 
 class Geocoder:
     """Geocoding, routing, and isochrone creation (Mapbox)."""
@@ -58,7 +61,6 @@ class Geocoder:
         params = {
             "access_token": self.api_key,
             "limit": 1,
-            # You can add "proximity" or "country" here if you want to bias results
         }
         r = self._session.get(url, params=params, timeout=20)
         r.raise_for_status()
@@ -91,8 +93,8 @@ class Geocoder:
         params = {
             "access_token": self.api_key,
             "alternatives": "false",
-            "overview": "false",     # we only need duration
-            "geometries": "geojson", # harmless even with overview=false
+            "overview": "false",
+            "geometries": "geojson",
         }
         resp = self._session.get(url, params=params, timeout=30)
         resp.raise_for_status()
@@ -104,14 +106,26 @@ class Geocoder:
         return max(0, int(round(seconds / 60.0)))
 
     # ---------------- Isochrones (Mapbox) ----------------
+    @staticmethod
+    def _cap_minutes(minutes: int) -> int:
+        if minutes > ISO_MAX_MINUTES:
+            # visible log to spot when clamping happens
+            print(f"[Isochrone] requested {minutes} min > cap {ISO_MAX_MINUTES}; clamping.")
+            return ISO_MAX_MINUTES
+        if minutes < 0:
+            return 0
+        return minutes
+
     def create_isochrone(
         self, center: Coordinates, travel_time_minutes: int, transport_mode: str = "walking"
     ) -> Isochrone:
         """
         Exterior ring (largest shell) of a Mapbox Isochrone for a single contour in minutes.
+        ALWAYS caps contours_minutes <= ISO_MAX_MINUTES.
         """
         profile = self._mb_profile(transport_mode)
-        key = (round(center.latitude, 6), round(center.longitude, 6), int(travel_time_minutes), profile)
+        capped = self._cap_minutes(int(travel_time_minutes))
+        key = (round(center.latitude, 6), round(center.longitude, 6), int(capped), profile)
 
         if key in self._iso_cache:
             geom = self._iso_cache[key]
@@ -119,22 +133,17 @@ class Geocoder:
             url = f"{MAPBOX_ISOCHRONE_URL}/{profile}/{center.longitude},{center.latitude}"
             params = {
                 "access_token": self.api_key,
-                "contours_minutes": int(max(0, travel_time_minutes)),
+                "contours_minutes": int(capped),
                 "polygons": "true",
-                # You can tune these if desired:
-                # "denoise": 1.0,
-                # "generalize": 0,
             }
             resp = self._session.get(url, params=params, timeout=30)
             resp.raise_for_status()
             gj = resp.json()
             feats = gj.get("features", [])
             if not feats:
-                # If minutes == 0, mapbox may return empty; treat as tiny buffer at the center
                 pt = Point(center.longitude, center.latitude)
                 geom = pt.buffer(1e-9)
             else:
-                # union polygons (usually a single feature)
                 geoms = [shape(f["geometry"]) for f in feats]
                 geom = unary_union(geoms).buffer(0)
             self._iso_cache[key] = geom
@@ -146,7 +155,7 @@ class Geocoder:
             exterior = largest.exterior
 
         coords = [Coordinates(latitude=lat, longitude=lon) for lon, lat in exterior.coords]
-        return Isochrone(center=center, travel_time_minutes=int(travel_time_minutes), polygon=coords)
+        return Isochrone(center=center, travel_time_minutes=int(capped), polygon=coords)
 
     # ---------------- Search zone (grid search over splits) ----------------
     def create_search_zone(
@@ -159,13 +168,12 @@ class Geocoder:
         """
         Build the search zone as the UNION of intersections from isochrone-size pairs
         that sum to: shortest_travel_time + max_additional_time.
-        - Use 5-minute increments normally.
-        - If base shortest time > 60 minutes, cap to 20 combos (even spacing).
+        We step in 5-minute increments (or up to 20 even-spaced points if base>60).
+        Each *individual* isochrone call is still capped by _cap_minutes().
         """
         base = self.shortest_travel_time_minutes(origin, destination, transport_mode)
         max_travel_time = base + int(max_additional_time)
 
-        # choose combo schedule
         if base > 60:
             combos = self._evenly_spaced_minutes(max_travel_time, max_count=20)
         else:
@@ -208,7 +216,7 @@ class Geocoder:
 
     # ---------------- Helpers ----------------
     def _iso_geom(self, center: Coordinates, minutes: int, transport_mode: str):
-        """Return shapely geometry for an isochrone; tiny buffer for 0 minutes."""
+        """Return shapely geometry for an isochrone; tiny buffer for 0 minutes. (Minutes are capped internally.)"""
         if minutes <= 0:
             return Point(center.longitude, center.latitude).buffer(1e-6)
         iso = self.create_isochrone(center, minutes, transport_mode)

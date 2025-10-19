@@ -17,33 +17,53 @@ spec:
     spec:
       containers:
         - name: har-backend
-          image: har-backend:dev               # build locally: docker build -t har-backend:dev .
+          image: har-backend:dev
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8000              
-          env:
-            - name: ALLOW_ORIGINS
-              value: "http://localhost:5173,https://detourist.com"
-            # stub creds; safe to keep for local
-            - name: LLM_API_KEY
-              value: "dev"
-            - name: GEOCODING_API_KEY
-              value: "dev"
-            - name: POI_API_KEY
-              value: "dev"
-            - name: ROUTING_API_KEY
-              value: "dev"
-            - name: CLIP_MODEL_PATH
-              value: "/models/clip"
+            - containerPort: 8000
+          # Run 2 workers so one can answer /healthz while the other does heavy work
+          args:
+            - uvicorn
+            - backend.api:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --workers
+            - "2"
+          envFrom:
+            - configMapRef:
+                name: har-backend-config
+            - secretRef:
+                name: har-backend-secrets
+          # --- Probes tuned for cold start + heavy work ---
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            failureThreshold: 30      # 30 * 5s = 150s
+            timeoutSeconds: 2
           readinessProbe:
             httpGet:
-              path: /healthz                   # fast probe
+              path: /healthz
               port: 8000
-            initialDelaySeconds: 2
+            initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet:
-              path: /healthz                   
+              path: /healthz
               port: 8000
-            initialDelaySeconds: 20
-            periodSeconds: 20
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "6Gi"

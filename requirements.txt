@@ -1,0 +1,21 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
+redis==5.0.1
+requests==2.32.3
+pydantic==1.10.7
+shapely==2.0.1
+Pillow==10.0.0
+numpy==1.26.4
+
+# CLIP / Transformers (CPU wheels)
+transformers==4.41.2
+torch==2.4.1+cpu
+torchvision==0.19.1+cpu
+
+# vector search (optional; harmless if unused at runtime)
+faiss-cpu==1.7.4
+sentence-transformers>=2.2.2
+
+# DO NOT INSTALL: mapillary
