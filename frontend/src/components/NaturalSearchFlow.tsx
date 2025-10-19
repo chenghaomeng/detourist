@@ -6,6 +6,8 @@ import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { Separator } from "./ui/separator";
 import { IntentEditor } from "./IntentEditor";
+import { extractRouteFromQuery } from "../services/openai";
+import { getRouteAlternatives } from "../services/directions";
 import {
   MapPin,
   Navigation,
@@ -77,6 +79,8 @@ interface RouteOption {
 interface NaturalSearchFlowProps {
   searchQuery: string;
   isNaturalSearch: boolean;
+  onDirectionsResult: (result: google.maps.DirectionsResult | null) => void;
+  onRouteIndexChange: (index: number) => void;
 }
 
 const routeOptions: RouteOption[] = [
@@ -184,6 +188,8 @@ const intentChips = [
 export function NaturalSearchFlow({
   searchQuery,
   isNaturalSearch,
+  onDirectionsResult,
+  onRouteIndexChange,
 }: NaturalSearchFlowProps) {
   const [currentStep, setCurrentStep] =
     useState<FlowStep>("search");
@@ -191,41 +197,87 @@ export function NaturalSearchFlow({
     string | null
   >(null);
   const [startLocation, setStartLocation] = useState(
-    "Forest Hills, SF",
+    "Current Location",
   );
   const [destination, setDestination] = useState("");
   const [activeChips, setActiveChips] = useState(intentChips);
   const [processingText, setProcessingText] = useState("");
   const [showIntentEditor, setShowIntentEditor] =
     useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [directionsData, setDirectionsData] = useState<google.maps.DirectionsResult | null>(null);
+  const [previousQuery, setPreviousQuery] = useState("");
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  // Detect new query and reset flow
+  useEffect(() => {
+    if (searchQuery && searchQuery !== previousQuery && currentStep !== "search") {
+      // User entered a new query, reset everything
+      setCurrentStep("search");
+      setDirectionsData(null);
+      onDirectionsResult(null);
+      setError(null);
+      setSelectedRoute(null);
+      setSelectedRouteIndex(0);
+      onRouteIndexChange(0);
+      setPreviousQuery(searchQuery);
+    }
+  }, [searchQuery, previousQuery, currentStep, onDirectionsResult, onRouteIndexChange]);
 
   // Auto-progress through processing when search is submitted
   useEffect(() => {
     if (searchQuery && currentStep === "search") {
+      setPreviousQuery(searchQuery);
       setCurrentStep("processing");
-      setProcessingText("Processing request");
+      setProcessingText("Processing request with AI...");
+      setError(null);
 
-      // Extract destination from query
-      setTimeout(() => {
-        if (searchQuery.toLowerCase().includes("marin")) {
-          setDestination("Marin County, CA");
-        } else if (
-          searchQuery.toLowerCase().includes("downtown")
-        ) {
-          setDestination("Downtown San Francisco, CA");
-        } else {
-          setDestination("Golden Gate Bridge, SF");
+      // Call OpenAI to extract origin and destination
+      const processQuery = async () => {
+        try {
+          // Step 1: Extract origin and destination using OpenAI
+          setProcessingText("Understanding your request...");
+          const extraction = await extractRouteFromQuery(searchQuery);
+          
+          setStartLocation(extraction.origin);
+          setDestination(extraction.destination);
+          
+          setProcessingText(`Finding routes from ${extraction.origin} to ${extraction.destination}...`);
+          
+          // Step 2: Get route directions from Google Maps
+          const directions = await getRouteAlternatives(
+            extraction.origin,
+            extraction.destination
+          );
+          
+          if (directions) {
+            setDirectionsData(directions);
+            onDirectionsResult(directions);
+            setProcessingText("Routes found! Analyzing options...");
+            
+            // Move to thinking step
+            setTimeout(() => {
+              setCurrentStep("thinking");
+            }, 1000);
+          } else {
+            setError("No routes found");
+            setCurrentStep("search");
+          }
+          
+        } catch (err) {
+          console.error("Error processing query:", err);
+          setError(err instanceof Error ? err.message : "Failed to process request");
+          setProcessingText("Error processing request. Please try again.");
+          setTimeout(() => {
+            setCurrentStep("search");
+          }, 3000);
         }
-        setProcessingText(
-          "We found a calm, scenic route from Forest Hills to your destination",
-        );
+      };
 
-        setTimeout(() => {
-          setCurrentStep("thinking");
-        }, 2000);
-      }, 1500);
+      processQuery();
     }
-  }, [searchQuery, currentStep]);
+  }, [searchQuery, currentStep, onDirectionsResult]);
 
   const toggleChip = (chipId: string) => {
     setActiveChips((chips) =>
@@ -238,8 +290,79 @@ export function NaturalSearchFlow({
   };
 
   const handleRouteSelect = (routeId: string) => {
+    const routeIndex = parseInt(routeId);
     setSelectedRoute(routeId);
+    setSelectedRouteIndex(routeIndex);
+    onRouteIndexChange(routeIndex);
     setCurrentStep("detail");
+  };
+
+  // Handle manual route regeneration when user edits origin/destination
+  const handleRegenerateRoutes = async () => {
+    if (!startLocation.trim() || !destination.trim()) {
+      setError("Please enter both starting point and destination");
+      return;
+    }
+
+    setIsRegenerating(true);
+    setError(null);
+
+    try {
+      // Get new route directions from Google Maps
+      const directions = await getRouteAlternatives(
+        startLocation,
+        destination
+      );
+
+      if (directions) {
+        setDirectionsData(directions);
+        onDirectionsResult(directions);
+        setSelectedRouteIndex(0);
+        onRouteIndexChange(0);
+      } else {
+        setError("No routes found between these locations");
+      }
+    } catch (err) {
+      console.error("Error regenerating routes:", err);
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate routes";
+      
+      // Provide more helpful error messages
+      if (errorMessage.includes("NOT_FOUND")) {
+        setError("Location not found. Please use more specific addresses (e.g., 'Blue Bottle Coffee, Ferry Building, San Francisco, CA' instead of just 'blue bottle coffee')");
+      } else if (errorMessage.includes("ZERO_RESULTS")) {
+        setError("No routes found between these locations. Try different addresses.");
+      } else {
+        setError(errorMessage);
+      }
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  // Convert Google Directions routes to RouteOption format
+  const convertDirectionsToRoutes = (): RouteOption[] => {
+    if (!directionsData?.routes) return routeOptions; // Fallback to mock data
+
+    return directionsData.routes.map((route, index) => {
+      const leg = route.legs[0];
+      return {
+        id: index.toString(),
+        title: index === 0 ? "Recommended Route" : `Alternative ${index}`,
+        score: 0.85 - (index * 0.1), // Simple scoring for now
+        duration: leg.duration?.text || "Unknown",
+        distance: leg.distance?.text || "Unknown",
+        detour: index === 0 ? "0%" : "+5%", // Simplified
+        tags: route.summary ? [route.summary] : ["via highways"],
+        description: `Route via ${route.summary || 'main roads'}`,
+        waypoints: route.legs.flatMap(l => l.via_waypoints?.map((w: google.maps.LatLng) => w.toString() || '') || []),
+        scoreBreakdown: {
+          scenic: 0.8,
+          safety: 0.85,
+          duration: 0.9 - (index * 0.1),
+          quiet: 0.7,
+        },
+      };
+    });
   };
 
   const renderSearchEntry = () => (
@@ -289,16 +412,25 @@ export function NaturalSearchFlow({
 
   const renderProcessingBanner = () => (
     <div className="p-6">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <div>
-            <h3 className="font-medium text-blue-900">
-              Processing request
+      <div className={`border rounded-lg p-4 ${error ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+        <div className="flex items-start gap-3">
+          {!error && (
+            <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0 mt-0.5" />
+          )}
+          <div className="flex-1">
+            <h3 className={`font-medium ${error ? 'text-red-900' : 'text-blue-900'}`}>
+              {error ? 'Error' : 'Processing with AI'}
             </h3>
-            <p className="text-sm text-blue-700 mt-1">
-              {processingText}
+            <p className={`text-sm mt-1 ${error ? 'text-red-700' : 'text-blue-700'}`}>
+              {error || processingText}
             </p>
+            {!error && (
+              <div className="mt-3 flex items-center gap-2">
+                <div className="flex-1 bg-blue-200 rounded-full h-1">
+                  <div className="bg-blue-600 h-1 rounded-full animate-pulse" style={{ width: '60%' }} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -337,7 +469,7 @@ export function NaturalSearchFlow({
             <div className="space-y-2 text-sm text-gray-700">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span>Origin: Forest Hills, SF</span>
+                <span>Origin: {startLocation}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -346,7 +478,10 @@ export function NaturalSearchFlow({
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                 <span>
-                  Preferences: Scenic, quiet, avoid highways
+                  Preferences: {activeChips
+                    .filter(chip => chip.active)
+                    .map(chip => chip.label)
+                    .join(', ') || 'None specified'}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -378,32 +513,69 @@ export function NaturalSearchFlow({
     <div className="p-4 space-y-4">
       {/* Material 3 - Location inputs with subtle background */}
       <div className="bg-white rounded-lg border border-gray-200 p-3">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 flex items-center justify-center">
-              <div className="w-1.5 h-1.5 rounded-full bg-[#1A73E8]"></div>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 flex items-center justify-center">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#1A73E8]"></div>
+              </div>
+              <input
+                type="text"
+                value={startLocation}
+                onChange={(e) => setStartLocation(e.target.value)}
+                className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-gray-900 placeholder-gray-500"
+                placeholder="Choose starting point"
+                disabled={isRegenerating}
+              />
             </div>
-            <input
-              type="text"
-              value={startLocation}
-              onChange={(e) => setStartLocation(e.target.value)}
-              className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-gray-900 placeholder-gray-500"
-              placeholder="Choose starting point"
-            />
+            <div className="ml-2 border-l-2 border-gray-300 h-4"></div>
+            <div className="flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-[#EA4335]" />
+              <input
+                type="text"
+                value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-gray-900 placeholder-gray-500"
+                placeholder="Choose destination"
+                disabled={isRegenerating}
+              />
+            </div>
           </div>
-          <div className="ml-2 border-l-2 border-gray-300 h-4"></div>
-          <div className="flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-[#EA4335]" />
-            <input
-              type="text"
-              value={destination}
-              onChange={(e) => setDestination(e.target.value)}
-              className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-gray-900 placeholder-gray-500"
-              placeholder="Choose destination"
-            />
+          
+          {/* Helpful hint */}
+          <div className="px-1">
+            <p className="text-xs text-gray-500">
+              💡 Tip: Use specific addresses or landmarks with city names
+            </p>
           </div>
+          
+          {/* Update Routes Button */}
+          <button
+            onClick={handleRegenerateRoutes}
+            disabled={isRegenerating || !startLocation.trim() || !destination.trim()}
+            className="w-full bg-[#1A73E8] hover:bg-[#1557B0] disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2.5 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+          >
+            {isRegenerating ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Generating Routes...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>Update Routes</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
+      
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
 
       {/* Material 3 - Chips for preferences */}
       <div className="flex flex-wrap gap-2">
@@ -443,11 +615,15 @@ export function NaturalSearchFlow({
 
       {/* Material 3 - Route cards */}
       <div className="space-y-2">
-        {routeOptions.map((route) => (
+        {convertDirectionsToRoutes().map((route) => (
           <div
             key={route.id}
             onClick={() => handleRouteSelect(route.id)}
-            className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+            className={`bg-white border rounded-lg p-4 transition-shadow cursor-pointer ${
+              selectedRouteIndex === parseInt(route.id)
+                ? 'border-blue-500 border-2 shadow-lg'
+                : 'border-gray-200 hover:shadow-md'
+            }`}
           >
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
@@ -532,7 +708,8 @@ export function NaturalSearchFlow({
   );
 
   const renderRouteDetail = () => {
-    const route = routeOptions.find(r => r.id === selectedRoute);
+    const routes = convertDirectionsToRoutes();
+    const route = routes.find(r => r.id === selectedRoute);
     if (!route) return null;
 
     return (

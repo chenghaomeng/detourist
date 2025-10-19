@@ -6,8 +6,11 @@ import { useState } from "react";
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState(""); // Only updates on submit
   const [isNaturalSearch, setIsNaturalSearch] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [directionsResult, setDirectionsResult] = useState<google.maps.DirectionsResult | null>(null);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
@@ -15,6 +18,7 @@ export default function App() {
 
   const handleSearchSubmit = (query: string) => {
     if (query.trim()) {
+      setSubmittedQuery(query); // Trigger the actual query processing
       setIsSidebarOpen(true);
     }
   };
@@ -37,7 +41,12 @@ export default function App() {
       <LeftSidebar onMenuClick={toggleSidebar} />
 
       {/* Map View */}
-      <SemanticMapView searchQuery={searchQuery} isNaturalSearch={isNaturalSearch} />
+      <SemanticMapView 
+        searchQuery={searchQuery} 
+        isNaturalSearch={isNaturalSearch}
+        directionsResult={directionsResult}
+        selectedRouteIndex={selectedRouteIndex}
+      />
       
       {/* Search Bar Overlay */}
       <div className={`absolute box-border flex flex-col gap-[10px] items-start py-[28px] top-0 transition-all duration-300 z-10 ${
@@ -94,8 +103,10 @@ export default function App() {
           <div className="basis-0 grow min-h-px min-w-px relative shrink-0 w-[461px]" data-name="Container">
             <div className="bg-clip-padding border-0 border-[transparent] border-solid box-border content-stretch flex flex-col h-full items-start overflow-y-auto relative rounded-[inherit] w-[461px]">
               <NaturalSearchFlow 
-                searchQuery={searchQuery} 
-                isNaturalSearch={isNaturalSearch} 
+                searchQuery={submittedQuery}
+                isNaturalSearch={isNaturalSearch}
+                onDirectionsResult={setDirectionsResult}
+                onRouteIndexChange={setSelectedRouteIndex}
               />
             </div>
           </div>
