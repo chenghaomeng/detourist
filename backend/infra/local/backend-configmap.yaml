@@ -1,0 +1,26 @@
+####################################
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: har-backend-config
+  namespace: har-local
+data:
+  # --- LLM (Ollama) ---
+  LLM_PROVIDER: ollama
+  OLLAMA_BASE_URL: http://detourist-ollama:11434
+  OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
+
+  # --- Redis (cache) ---
+  REDIS_URL: redis://har-redis:6379/0
+
+  # --- CORS ---
+  ALLOW_ORIGINS: "*"
+
+  # --- Geocoding/routing knobs ---
+  MB_ISO_MAX_MIN: "60"   # search-zone travel-time budget (min)
+
+  # --- Scoring (CLIP + Mapillary) ---
+  ENABLE_SCORING: "true"
+  SCORING_MIN_IMAGES: "3"
+  SCORING_MAX_IMAGES: "6"
+  CLIP_MODEL_NAME: openai/clip-vit-base-patch32
