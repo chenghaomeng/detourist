@@ -8,6 +8,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState(""); // Only updates on submit
   const [isNaturalSearch, setIsNaturalSearch] = useState(true);
+  const [isEnhancedMode, setIsEnhancedMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [directionsResult, setDirectionsResult] = useState<google.maps.DirectionsResult | null>(null);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
@@ -57,6 +58,8 @@ export default function App() {
           onSearchSubmit={handleSearchSubmit}
           isNaturalSearch={isNaturalSearch}
           onNaturalSearchToggle={handleNaturalSearchToggle}
+          isEnhancedMode={isEnhancedMode}
+          onEnhancedModeToggle={() => setIsEnhancedMode(!isEnhancedMode)}
         />
       </div>
 
@@ -105,6 +108,7 @@ export default function App() {
               <NaturalSearchFlow 
                 searchQuery={submittedQuery}
                 isNaturalSearch={isNaturalSearch}
+                isEnhancedMode={isEnhancedMode}
                 onDirectionsResult={setDirectionsResult}
                 onRouteIndexChange={setSelectedRouteIndex}
               />

@@ -58,7 +58,12 @@ class RouteOrchestrator:
         self.geocoder = Geocoder(config.get('geocoding_api_key', ''))
         self.waypoint_searcher = WaypointSearcher(config.get('poi_api_key', ''))
         self.route_builder = RouteBuilder(config.get('routing_api_key', ''))
-        self.route_scorer = RouteScorer(config.get('clip_model_path', ''))
+        # Use default HuggingFace CLIP model instead of local path
+        clip_model = config.get('clip_model_path', '')
+        # If clip_model_path is empty or a local path, use the default HF model
+        if not clip_model or clip_model.startswith('/') or clip_model.endswith('.pth'):
+            clip_model = "openai/clip-vit-base-patch32"
+        self.route_scorer = RouteScorer(clip_model)
         
         # Setup logging
         logging.basicConfig(level=logging.INFO)
@@ -150,16 +155,36 @@ class RouteOrchestrator:
 
             # [CHANGED] Convert dataclasses/objects into dicts with the fields our API/FE expect.
             api_routes: List[Dict[str, Any]] = []
-            for sr in top_routes:
+            for idx, sr in enumerate(top_routes):
+                route = sr.route
+                
+                # Convert polyline segments to GeoJSON LineString
+                geometry = {
+                    "type": "LineString",
+                    "coordinates": []  # Would need polyline decoder for full implementation
+                }
+                
+                # Generate map links
+                origin_coords = f"{route.origin.latitude},{route.origin.longitude}"
+                dest_coords = f"{route.destination.latitude},{route.destination.longitude}"
+                waypoint_coords = "|".join([f"{w.coordinates.latitude},{w.coordinates.longitude}" for w in route.waypoints])
+                
+                google_link = f"https://www.google.com/maps/dir/{origin_coords}/{waypoint_coords}/{dest_coords}"
+                apple_link = f"http://maps.apple.com/?saddr={origin_coords}&daddr={dest_coords}"
+                
+                # Generate description
+                waypoint_names = [w.name for w in route.waypoints[:3]]  # Top 3 waypoints
+                why = f"Route via {', '.join(waypoint_names)}" if waypoint_names else "Direct route"
+                
                 api_routes.append({
-                    "id": getattr(sr, "id", None),
-                    "score": getattr(sr, "score", None),
-                    "geometry": getattr(sr, "geometry", None),   # GeoJSON LineString preferred
-                    "features": getattr(sr, "features", None),
-                    "links": getattr(sr, "links", None),         # {"google": "...", "apple": "..."}
-                    "why": getattr(sr, "why", None),
-                    "distance_m": getattr(sr, "distance_m", None),
-                    "duration_s": getattr(sr, "duration_s", None),
+                    "id": str(idx + 1),
+                    "score": sr.overall_score,
+                    "geometry": geometry,
+                    "features": route.input_queries,  # OSM tags used
+                    "links": {"google": google_link, "apple": apple_link},
+                    "why": why,
+                    "distance_m": int(route.total_distance_meters),
+                    "duration_s": int(route.total_duration_seconds),
                 })
             
             return RouteResponse(

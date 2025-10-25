@@ -8,6 +8,7 @@ import { Separator } from "./ui/separator";
 import { IntentEditor } from "./IntentEditor";
 import { extractRouteFromQuery } from "../services/openai";
 import { getRouteAlternatives } from "../services/directions";
+import { generateRoutesFromBackend, BackendRoute } from "../services/backend-api";
 import {
   MapPin,
   Navigation,
@@ -68,6 +69,10 @@ interface RouteOption {
   tags: string[];
   description: string;
   waypoints: string[];
+  mapLinks?: {
+    google?: string;
+    apple?: string;
+  };
   scoreBreakdown: {
     scenic: number;
     safety: number;
@@ -79,6 +84,7 @@ interface RouteOption {
 interface NaturalSearchFlowProps {
   searchQuery: string;
   isNaturalSearch: boolean;
+  isEnhancedMode: boolean;
   onDirectionsResult: (result: google.maps.DirectionsResult | null) => void;
   onRouteIndexChange: (index: number) => void;
 }
@@ -188,6 +194,7 @@ const intentChips = [
 export function NaturalSearchFlow({
   searchQuery,
   isNaturalSearch,
+  isEnhancedMode,
   onDirectionsResult,
   onRouteIndexChange,
 }: NaturalSearchFlowProps) {
@@ -209,6 +216,8 @@ export function NaturalSearchFlow({
   const [previousQuery, setPreviousQuery] = useState("");
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [backendRoutes, setBackendRoutes] = useState<BackendRoute[]>([]);
+  const [isLoadingEnhanced, setIsLoadingEnhanced] = useState(false);
 
   // Detect new query and reset flow
   useEffect(() => {
@@ -233,42 +242,74 @@ export function NaturalSearchFlow({
       setProcessingText("Processing request with AI...");
       setError(null);
 
-      // Call OpenAI to extract origin and destination
+      // Process query based on mode
       const processQuery = async () => {
         try {
-          // Step 1: Extract origin and destination using OpenAI
-          setProcessingText("Understanding your request...");
-          const extraction = await extractRouteFromQuery(searchQuery);
-          
-          setStartLocation(extraction.origin);
-          setDestination(extraction.destination);
-          
-          setProcessingText(`Finding routes from ${extraction.origin} to ${extraction.destination}...`);
-          
-          // Step 2: Get route directions from Google Maps
-          const directions = await getRouteAlternatives(
-            extraction.origin,
-            extraction.destination
-          );
-          
-          if (directions) {
-            setDirectionsData(directions);
-            onDirectionsResult(directions);
-            setProcessingText("Routes found! Analyzing options...");
+          if (isEnhancedMode) {
+            // ENHANCED MODE: Use full backend pipeline
+            setProcessingText("Analyzing with AI (this may take 10-30 seconds)...");
+            setIsLoadingEnhanced(true);
             
-            // Move to thinking step
+            const backendResponse = await generateRoutesFromBackend({
+              user_prompt: searchQuery,
+              max_results: 3
+            });
+            
+            setBackendRoutes(backendResponse.routes);
+            
+            // Extract origin/dest from backend response if available
+            if (backendResponse.routes[0]) {
+              // Try to parse from metadata or use generic names
+              setStartLocation("Origin");
+              setDestination("Destination");
+            }
+            
+            setProcessingText(
+              `Found ${backendResponse.routes.length} AI-curated routes! ` +
+              `(${backendResponse.metadata.waypoints_found} scenic waypoints discovered)`
+            );
+            
+            setIsLoadingEnhanced(false);
             setTimeout(() => {
               setCurrentStep("thinking");
             }, 1000);
+            
           } else {
-            setError("No routes found");
-            setCurrentStep("search");
+            // QUICK MODE: Current OpenAI + Google Maps flow
+            setProcessingText("Understanding your request...");
+            const extraction = await extractRouteFromQuery(searchQuery);
+            
+            setStartLocation(extraction.origin);
+            setDestination(extraction.destination);
+            
+            setProcessingText(`Finding routes from ${extraction.origin} to ${extraction.destination}...`);
+            
+            // Step 2: Get route directions from Google Maps
+            const directions = await getRouteAlternatives(
+              extraction.origin,
+              extraction.destination
+            );
+            
+            if (directions) {
+              setDirectionsData(directions);
+              onDirectionsResult(directions);
+              setProcessingText("Routes found! Analyzing options...");
+              
+              // Move to thinking step
+              setTimeout(() => {
+                setCurrentStep("thinking");
+              }, 1000);
+            } else {
+              setError("No routes found");
+              setCurrentStep("search");
+            }
           }
           
         } catch (err) {
           console.error("Error processing query:", err);
           setError(err instanceof Error ? err.message : "Failed to process request");
           setProcessingText("Error processing request. Please try again.");
+          setIsLoadingEnhanced(false);
           setTimeout(() => {
             setCurrentStep("search");
           }, 3000);
@@ -339,8 +380,49 @@ export function NaturalSearchFlow({
     }
   };
 
+  // Convert backend routes to UI format
+  const convertBackendRoutesToUI = (): RouteOption[] => {
+    if (!backendRoutes.length) return [];
+    
+    // Calculate shortest route distance for detour calculation
+    const shortestDistance = Math.min(...backendRoutes.map(r => r.distance_m));
+    
+    return backendRoutes.map((route, index) => {
+      // Calculate detour percentage
+      const detourPct = ((route.distance_m - shortestDistance) / shortestDistance * 100).toFixed(0);
+      const detourText = detourPct === "0" ? "0%" : `+${detourPct}%`;
+      
+      // Parse waypoint names from "why" field (e.g., "Route via X, Y, Z")
+      const waypointNames = route.why?.match(/Route via (.+)/)?.[1]?.split(', ') || [];
+      
+      return {
+        id: route.id,
+        title: index === 0 ? "Most Scenic (AI)" : `Alternative ${index} (AI)`,
+        score: route.score,
+        duration: `${Math.round(route.duration_s / 60)} min`,
+        distance: `${(route.distance_m / 1609).toFixed(1)} mi`,
+        detour: detourText,
+        tags: route.features || [],
+        description: route.why || "AI-generated scenic route",
+        waypoints: waypointNames,
+        mapLinks: route.links,
+        scoreBreakdown: {
+          scenic: (route.score * 0.95) / 100,  // Normalize to 0-1 scale
+          safety: (route.score * 0.85) / 100,
+          duration: (route.score * 0.80) / 100,
+          quiet: (route.score * 0.75) / 100,
+        }
+      };
+    });
+  };
+
   // Convert Google Directions routes to RouteOption format
   const convertDirectionsToRoutes = (): RouteOption[] => {
+    // Use backend routes if in enhanced mode
+    if (isEnhancedMode && backendRoutes.length > 0) {
+      return convertBackendRoutesToUI();
+    }
+    
     if (!directionsData?.routes) return routeOptions; // Fallback to mock data
 
     return directionsData.routes.map((route, index) => {
@@ -681,7 +763,7 @@ export function NaturalSearchFlow({
                       <Star
                         key={i}
                         className={`w-3 h-3 ${
-                          i < Math.round(route.score * 5)
+                          i < Math.round((route.score > 1 ? route.score / 100 : route.score) * 5)
                             ? "fill-[#FBBC04] text-[#FBBC04]"
                             : "fill-gray-200 text-gray-200"
                         }`}
@@ -689,7 +771,7 @@ export function NaturalSearchFlow({
                     ))}
                   </div>
                   <span className="text-xs font-medium text-gray-700 ml-1">
-                    {(route.score * 10).toFixed(1)}/10
+                    {(route.score > 1 ? route.score / 10 : route.score * 10).toFixed(1)}/10
                   </span>
                 </div>
               </div>
@@ -761,25 +843,60 @@ export function NaturalSearchFlow({
             </p>
           </div>
 
-          {/* Waypoints */}
-          <div>
-            <h3 className="font-medium text-gray-900 mb-3">
-              Key waypoints
-            </h3>
-            <div className="space-y-2">
-              {route.waypoints.map((waypoint, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-3 text-sm"
-                >
-                  <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
-                    {index + 1}
-                  </div>
-                  <span className="text-gray-900">{waypoint}</span>
-                </div>
-              ))}
+          {/* Map Links */}
+          {route.mapLinks && (route.mapLinks.google || route.mapLinks.apple) && (
+            <div>
+              <h3 className="font-medium text-gray-900 mb-3">
+                Open in Maps
+              </h3>
+              <div className="flex gap-2">
+                {route.mapLinks.google && (
+                  <a
+                    href={route.mapLinks.google}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Navigation className="w-4 h-4" />
+                    Google Maps
+                  </a>
+                )}
+                {route.mapLinks.apple && (
+                  <a
+                    href={route.mapLinks.apple}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-4 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    <MapPin className="w-4 h-4" />
+                    Apple Maps
+                  </a>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Waypoints */}
+          {route.waypoints && route.waypoints.length > 0 && (
+            <div>
+              <h3 className="font-medium text-gray-900 mb-3">
+                Key waypoints
+              </h3>
+              <div className="space-y-2">
+                {route.waypoints.map((waypoint, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-3 text-sm"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
+                      {index + 1}
+                    </div>
+                    <span className="text-gray-900">{waypoint}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Score breakdown */}
           <div>
@@ -811,21 +928,23 @@ export function NaturalSearchFlow({
           </div>
 
           {/* Tags */}
-          <div>
-            <h3 className="font-medium text-gray-900 mb-2">
-              Features
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {route.tags.map((tag, index) => (
-                <span
-                  key={index}
-                  className="inline-flex items-center bg-[#E8F0FE] text-[#1A73E8] rounded-full px-3 py-1.5 text-xs font-medium"
-                >
-                  {tag}
-                </span>
-              ))}
+          {route.tags && route.tags.length > 0 && (
+            <div>
+              <h3 className="font-medium text-gray-900 mb-2">
+                Features
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {route.tags.map((tag, index) => (
+                  <span
+                    key={index}
+                    className="inline-flex items-center bg-[#E8F0FE] text-[#1A73E8] rounded-full px-3 py-1.5 text-xs font-medium"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Fixed bottom actions - Material 3 style */}

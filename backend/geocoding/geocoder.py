@@ -58,7 +58,8 @@ class Geocoder:
         params = {
             "access_token": self.api_key,
             "limit": 1,
-            # You can add "proximity" or "country" here if you want to bias results
+            "country": "US",  # Bias results to United States
+            # You can add "proximity" here if you want to bias to a specific city
         }
         r = self._session.get(url, params=params, timeout=20)
         r.raise_for_status()

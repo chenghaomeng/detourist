@@ -12,7 +12,7 @@ This module provides:
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Dict, Any, Optional
 import uvicorn
 import os
@@ -26,12 +26,12 @@ class PlaceInput(BaseModel):  # [ADDED]
     lat: Optional[float] = None
     lon: Optional[float] = None
 
-    @root_validator
-    def must_have_text_or_coords(cls, v):
+    @model_validator(mode='after')
+    def must_have_text_or_coords(self):
         # Allow text OR lat/lon. UI may send either.
-        if not v.get("text") and (v.get("lat") is None or v.get("lon") is None):
+        if not self.text and (self.lat is None or self.lon is None):
             raise ValueError("Provide either 'text' or both 'lat' and 'lon' for origin/destination.")
-        return v
+        return self
 
 class TimeInput(BaseModel):  # [ADDED]
     max_duration_min: Optional[int] = Field(default=None, ge=1, le=1440)

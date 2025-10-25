@@ -13,39 +13,47 @@ services:
       - POI_API_KEY=${POI_API_KEY}
       - ROUTING_API_KEY=${ROUTING_API_KEY}
       - CLIP_MODEL_PATH=/app/models/clip_model.pth
-      - OPENAI_COMPATIBLE_URL=${OPENAI_COMPATIBLE_URL:-http://ollama:11434/v1/chat/completions}
-      - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY:-dummy-key}
+      # 🚀 Using LOCAL Ollama (faster) - set to http://ollama:11434/... to use Docker Ollama instead
+      - OPENAI_COMPATIBLE_URL=http://host.docker.internal:11434/v1/chat/completions
+      - OPENAI_COMPATIBLE_API_KEY=dummy-key
     volumes:
       - ./models:/app/models
       - ./logs:/app/logs
     depends_on:
       - redis
-      - ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Required for LOCAL Ollama connection
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      - VITE_BACKEND_URL=http://backend:8000
+      - VITE_OPENAI_API_KEY=${VITE_OPENAI_API_KEY}
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
     depends_on:
       - backend
     restart: unless-stopped
 
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_KEEP_ALIVE=10m
-      - OLLAMA_GPU_LAYERS=35  # Use GPU for 35 layers (out of 40 total)
-    restart: unless-stopped
+  # ⚠️ Docker Ollama - DISABLED (using local Ollama instead for better performance)
+  # Uncomment this section if you want to use Docker Ollama:
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   environment:
+  #     - OLLAMA_HOST=0.0.0.0
+  #     - OLLAMA_KEEP_ALIVE=10m
+  #     - OLLAMA_GPU_LAYERS=35
+  #   restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -57,4 +65,4 @@ services:
 
 volumes:
   redis_data:
-  ollama_data:
+  # ollama_data:  # Not needed when using local Ollama
