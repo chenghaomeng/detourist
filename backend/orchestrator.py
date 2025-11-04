@@ -66,7 +66,12 @@ class RouteOrchestrator:
         self.route_scorer = RouteScorer(clip_model)
         
         # Setup logging
-        logging.basicConfig(level=logging.INFO)
+        import os
+        log_level = os.getenv('LOG_LEVEL', 'INFO')
+        logging.basicConfig(
+            level=getattr(logging, log_level),
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
         self.logger = logging.getLogger(__name__)
     
     def generate_routes(self, request: RouteRequest) -> RouteResponse:
@@ -85,6 +90,12 @@ class RouteOrchestrator:
             # Step 1: Extract parameters from user prompt
             self.logger.info("Extracting parameters from user prompt")
             extracted_params: ExtractedParameters = self.extractor.extract_parameters(request.user_prompt)
+            
+            # Log extracted parameters
+            self.logger.info(f"Extracted - Origin: {extracted_params.origin}, Dest: {extracted_params.destination}")
+            self.logger.info(f"Time flexibility: {extracted_params.time_flexibility_minutes} min")
+            self.logger.info(f"Waypoint queries ({len(extracted_params.waypoint_queries)}): {extracted_params.waypoint_queries}")
+            self.logger.info(f"Constraints: {extracted_params.constraints}")
             
             # [ADDED] UI overrides take precedence over LLM extraction (when present)
             # (We keep the extractor's values in place if UI did not override.)
@@ -123,6 +134,10 @@ class RouteOrchestrator:
             else:
                 destination_coords = extracted_params.destination_coords
             
+            # Log coordinates
+            self.logger.info(f"Origin coords: ({origin_coords.latitude:.6f}, {origin_coords.longitude:.6f})")
+            self.logger.info(f"Destination coords: ({destination_coords.latitude:.6f}, {destination_coords.longitude:.6f})")
+            
             # Step 3: Create search zone using isochrones
             self.logger.info("Creating search zone")
             # [COMMENTED-OUT] original pattern widened time by flexibility (keep for future use)
@@ -135,15 +150,38 @@ class RouteOrchestrator:
             
             # Step 4: Search for waypoints
             self.logger.info("Searching for waypoints")
+            
+            # If no waypoint queries were extracted, use default scenic/tourist queries
+            waypoint_queries = extracted_params.waypoint_queries
+            if not waypoint_queries:
+                waypoint_queries = [
+                    "tourism=attraction",
+                    "leisure=park", 
+                    "tourism=viewpoint",
+                    "amenity=cafe",
+                    "tourism=information"
+                ]
+                self.logger.info(f"No specific waypoint preferences found, using default scenic queries: {waypoint_queries}")
+            
             waypoints: List[Waypoint] = self.waypoint_searcher.search_waypoints(
-                search_zone, extracted_params.waypoint_queries
+                search_zone, waypoint_queries
             )
+            
+            # Log waypoint search results
+            self.logger.info(f"Found {len(waypoints)} waypoints")
+            if waypoints:
+                top_5 = waypoints[:5]
+                for i, wp in enumerate(top_5, 1):
+                    self.logger.info(f"  Waypoint {i}: {wp.name} at ({wp.coordinates.latitude:.6f}, {wp.coordinates.longitude:.6f}), score={wp.relevance_score:.2f}")
             
             # Step 5: Build routes through waypoints
             self.logger.info("Building routes")
             routes: List[Route] = self.route_builder.build_routes(
                 origin_coords, destination_coords, waypoints, extracted_params.constraints
             )
+            
+            # Log route building results
+            self.logger.info(f"Built {len(routes)} routes with segments: {[len(r.segments) for r in routes[:5]]}")
             
             # Step 6: Score and rank routes
             self.logger.info("Scoring routes")
@@ -152,6 +190,22 @@ class RouteOrchestrator:
             # Step 7: Return top results
             top_routes = scored_routes[:request.max_results]
             processing_time = time.time() - start_time
+            
+            # Log scoring results
+            self.logger.info(f"Top {len(top_routes)} route scores: {[f'{sr.overall_score:.2f}' for sr in top_routes]}")
+            
+            # Log detailed information for top routes
+            for idx, sr in enumerate(top_routes, 1):
+                route = sr.route
+                self.logger.info(f"Route #{idx} - Score: {sr.overall_score:.2f}")
+                self.logger.info(f"  Distance: {route.total_distance_meters/1000:.2f}km, Duration: {route.total_duration_seconds/60:.1f}min")
+                self.logger.info(f"  Origin: ({route.origin.latitude:.6f}, {route.origin.longitude:.6f})")
+                self.logger.info(f"  Destination: ({route.destination.latitude:.6f}, {route.destination.longitude:.6f})")
+                self.logger.info(f"  Waypoints ({len(route.waypoints)}): {[w.name for w in route.waypoints]}")
+                if route.waypoints:
+                    for w in route.waypoints:
+                        self.logger.info(f"    - {w.name}: ({w.coordinates.latitude:.6f}, {w.coordinates.longitude:.6f})")
+                self.logger.info(f"  Segments: {len(route.segments)}, Total instructions: {sum(len(s.instructions) for s in route.segments)}")
 
             # [CHANGED] Convert dataclasses/objects into dicts with the fields our API/FE expect.
             api_routes: List[Dict[str, Any]] = []
@@ -164,13 +218,33 @@ class RouteOrchestrator:
                     "coordinates": []  # Would need polyline decoder for full implementation
                 }
                 
-                # Generate map links
+                # Provide coordinate data for frontend Google Maps integration
                 origin_coords = f"{route.origin.latitude},{route.origin.longitude}"
                 dest_coords = f"{route.destination.latitude},{route.destination.longitude}"
                 waypoint_coords = "|".join([f"{w.coordinates.latitude},{w.coordinates.longitude}" for w in route.waypoints])
                 
+                # Generate map links for fallback
                 google_link = f"https://www.google.com/maps/dir/{origin_coords}/{waypoint_coords}/{dest_coords}"
                 apple_link = f"http://maps.apple.com/?saddr={origin_coords}&daddr={dest_coords}"
+                
+                # Provide coordinate data for frontend Google Maps integration
+                coordinates = {
+                    "origin": {
+                        "lat": route.origin.latitude,
+                        "lng": route.origin.longitude
+                    },
+                    "destination": {
+                        "lat": route.destination.latitude,
+                        "lng": route.destination.longitude
+                    },
+                    "waypoints": [
+                        {
+                            "lat": w.coordinates.latitude,
+                            "lng": w.coordinates.longitude,
+                            "name": w.name
+                        } for w in route.waypoints
+                    ]
+                }
                 
                 # Generate description
                 waypoint_names = [w.name for w in route.waypoints[:3]]  # Top 3 waypoints
@@ -182,6 +256,7 @@ class RouteOrchestrator:
                     "geometry": geometry,
                     "features": route.input_queries,  # OSM tags used
                     "links": {"google": google_link, "apple": apple_link},
+                    "coordinates": coordinates,  # Raw coordinate data for frontend Google Maps
                     "why": why,
                     "distance_m": int(route.total_distance_meters),
                     "duration_s": int(route.total_duration_seconds),

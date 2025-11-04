@@ -151,14 +151,24 @@ function SearchButton({ onClick }: { onClick: () => void }) {
 }
 
 function EnhancedModeToggle({ isActive, onClick }: { isActive: boolean; onClick: () => void }) {
+  const [animKey, setAnimKey] = useState(0);
+
+  const handleClick = () => {
+    setAnimKey(prev => prev + 1);
+    onClick();
+  };
+
   return (
     <button 
       className={`relative h-[26px] rounded-[1.67772e+07px] shrink-0 cursor-pointer transition-all duration-200 overflow-hidden ${
         isActive 
-          ? 'bg-[#34A853] w-auto' 
-          : 'bg-[#E8F5E9] hover:bg-[#C8E6C9] w-[34px]'
+          ? '!bg-green-600 w-auto' 
+          : '!bg-green-100 hover:!bg-green-200 w-[34px]'
       }`}
-      onClick={onClick}
+      style={{
+        backgroundColor: isActive ? '#16a34a' : '#dcfce7'
+      }}
+      onClick={handleClick}
       data-name="EnhancedModeToggle"
       aria-label={isActive ? "Enhanced Mode Active" : "Enhanced Mode Inactive"}
       title={isActive ? "Enhanced Mode: AI-powered scenic routes" : "Quick Mode: Fast standard routes"}
@@ -166,20 +176,22 @@ function EnhancedModeToggle({ isActive, onClick }: { isActive: boolean; onClick:
       <div className={`bg-clip-padding border-0 border-[transparent] border-solid box-border content-stretch flex gap-[6px] h-[26px] items-center py-0 relative ${
         isActive ? 'px-[10px]' : 'px-[10px] justify-center'
       }`}>
-        <div className="relative shrink-0 size-[14px]">
+        <div className={isActive ? 'animate-[spring-spin_0.8s_cubic-bezier(0.34,1.56,0.64,1)]' : ''} key={isActive ? animKey : undefined}>
           {isActive ? (
-            // Brain/AI icon for enhanced mode
-            <svg className="block size-full" fill="none" viewBox="0 0 14 14">
-              <path d="M7 1.75C4.38 1.75 2.25 3.88 2.25 6.5C2.25 7.5 2.55 8.43 3.06 9.21L2.25 11.75L4.79 10.94C5.57 11.45 6.5 11.75 7.5 11.75C10.12 11.75 12.25 9.62 12.25 7C12.25 4.38 10.12 2.25 7.5 2.25" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <circle cx="5.5" cy="6.5" r="0.5" fill="white"/>
-              <circle cx="7" cy="6.5" r="0.5" fill="white"/>
-              <circle cx="8.5" cy="6.5" r="0.5" fill="white"/>
-            </svg>
+            <div className="relative shrink-0 size-[14px]" data-name="Icon">
+              <svg className="block size-full" fill="none" viewBox="0 0 14 14">
+                <path d="M7 1.75C4.38 1.75 2.25 3.88 2.25 6.5C2.25 7.5 2.55 8.43 3.06 9.21L2.25 11.75L4.79 10.94C5.57 11.45 6.5 11.75 7.5 11.75C10.12 11.75 12.25 9.62 12.25 7C12.25 4.38 10.12 2.25 7.5 2.25" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                <circle cx="5.5" cy="6.5" r="0.5" fill="white"/>
+                <circle cx="7" cy="6.5" r="0.5" fill="white"/>
+                <circle cx="8.5" cy="6.5" r="0.5" fill="white"/>
+              </svg>
+            </div>
           ) : (
-            // Lightning bolt for quick mode
-            <svg className="block size-full" fill="none" viewBox="0 0 14 14">
-              <path d="M7.5 1.75L3.5 7.5H7L6.5 12.25L10.5 6.5H7L7.5 1.75Z" stroke="#34A853" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-            </svg>
+            <div className="relative shrink-0 size-[14px]" data-name="Icon">
+              <svg className="block size-full" fill="none" viewBox="0 0 14 14">
+                <path d="M7.5 1.75L3.5 7.5H7L6.5 12.25L10.5 6.5H7L7.5 1.75Z" stroke="rgb(34, 197, 94)" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+              </svg>
+            </div>
           )}
         </div>
         

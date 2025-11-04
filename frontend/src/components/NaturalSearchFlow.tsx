@@ -2,12 +2,10 @@ import svgPaths from "../imports/svg-sijx7d9tyk";
 import { useState, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Badge } from "./ui/badge";
-import { Card } from "./ui/card";
 import { Separator } from "./ui/separator";
 import { IntentEditor } from "./IntentEditor";
 import { extractRouteFromQuery } from "../services/openai";
-import { getRouteAlternatives } from "../services/directions";
+import { getRouteAlternatives, convertBackendRouteToDirections } from "../services/directions";
 import { generateRoutesFromBackend, BackendRoute } from "../services/backend-api";
 import {
   MapPin,
@@ -20,15 +18,12 @@ import {
   Star,
   Sparkles,
   ChevronRight,
-  Eye,
   RotateCcw,
-  Heart,
-  Share,
-  Play,
-  Settings,
   Award,
-  Info,
-  TrendingUp,
+  Settings,
+  Play,
+  Share,
+  Heart,
 } from "lucide-react";
 
 function SparkleIcon() {
@@ -78,6 +73,16 @@ interface RouteOption {
     safety: number;
     duration: number;
     quiet: number;
+  };
+  backendData?: {
+    rawScore: number;
+    waypointCount: number;
+    features: string[];
+    coordinates: {
+      origin: { lat: number; lng: number; };
+      destination: { lat: number; lng: number; };
+      waypoints: Array<{ lat: number; lng: number; name: string; }>;
+    };
   };
 }
 
@@ -218,6 +223,7 @@ export function NaturalSearchFlow({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [backendRoutes, setBackendRoutes] = useState<BackendRoute[]>([]);
   const [isLoadingEnhanced, setIsLoadingEnhanced] = useState(false);
+  const [expandedWaypoints, setExpandedWaypoints] = useState<Set<number>>(new Set());
 
   // Detect new query and reset flow
   useEffect(() => {
@@ -256,6 +262,16 @@ export function NaturalSearchFlow({
             });
             
             setBackendRoutes(backendResponse.routes);
+            
+            // Convert backend routes to Google Maps directions for map display
+            if (backendResponse.routes.length > 0) {
+              try {
+                const directionsResult = await convertBackendRouteToDirections(backendResponse.routes[0]);
+                setDirectionsData(directionsResult);
+              } catch (error) {
+                console.error("Failed to convert backend route to directions:", error);
+              }
+            }
             
             // Extract origin/dest from backend response if available
             if (backendResponse.routes[0]) {
@@ -330,12 +346,39 @@ export function NaturalSearchFlow({
     );
   };
 
-  const handleRouteSelect = (routeId: string) => {
+  const toggleWaypointExpansion = (index: number) => {
+    setExpandedWaypoints(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(index)) {
+        newSet.delete(index);
+      } else {
+        newSet.add(index);
+      }
+      return newSet;
+    });
+  };
+
+  const handleRouteSelect = async (routeId: string) => {
     const routeIndex = parseInt(routeId);
     setSelectedRoute(routeId);
     setSelectedRouteIndex(routeIndex);
     onRouteIndexChange(routeIndex);
     setCurrentStep("detail");
+    
+    // Convert selected backend route to Google Maps directions for map display
+    if (isEnhancedMode && backendRoutes.length > 0) {
+      // Backend uses 1-indexed IDs, but we need 0-indexed array access
+      const arrayIndex = routeIndex - 1;
+      if (backendRoutes[arrayIndex]) {
+        try {
+          const directionsResult = await convertBackendRouteToDirections(backendRoutes[arrayIndex]);
+          setDirectionsData(directionsResult);
+          onDirectionsResult(directionsResult);
+        } catch (error) {
+          console.error("Failed to convert selected backend route to directions:", error);
+        }
+      }
+    }
   };
 
   // Handle manual route regeneration when user edits origin/destination
@@ -392,25 +435,92 @@ export function NaturalSearchFlow({
       const detourPct = ((route.distance_m - shortestDistance) / shortestDistance * 100).toFixed(0);
       const detourText = detourPct === "0" ? "0%" : `+${detourPct}%`;
       
-      // Parse waypoint names from "why" field (e.g., "Route via X, Y, Z")
-      const waypointNames = route.why?.match(/Route via (.+)/)?.[1]?.split(', ') || [];
+      // Parse waypoint names from coordinates
+      const waypointNames = route.coordinates.waypoints.map(wp => wp.name);
+      
+      // Convert OSM tags to user-friendly labels
+      const friendlyFeatures = route.features.map(tag => {
+        const [key, value] = tag.split('=');
+        switch(key) {
+          case 'leisure': return value === 'park' ? 'Parks' : value;
+          case 'tourism': return value === 'attraction' ? 'Attractions' : value;
+          case 'amenity': return value === 'cafe' ? 'Cafes' : value;
+          case 'natural': return 'Natural areas';
+          default: return `${key}=${value}`;
+        }
+      });
+      
+      // Create descriptive title based on waypoint names
+      const createRouteTitle = () => {
+        if (waypointNames.length === 0) {
+          return index === 0 ? "Direct Path" : `Alternative ${index}`;
+        }
+        
+        // Use the first waypoint name, but make it more user-friendly
+        const firstWaypoint = waypointNames[0];
+        
+        // If it's a user-friendly name (doesn't contain OSM tags), use it directly
+        if (!firstWaypoint.includes('=') && !firstWaypoint.includes('way ') && !firstWaypoint.includes('node ')) {
+          const shortName = firstWaypoint.length > 30 ? firstWaypoint.substring(0, 30) + "..." : firstWaypoint;
+          return shortName;
+        }
+        
+        // Create descriptive titles based on waypoint type and context
+        if (firstWaypoint.includes('leisure=park')) {
+          return index === 0 ? "Park Stroll" : `Park Walk ${index}`;
+        } else if (firstWaypoint.includes('tourism=attraction')) {
+          return index === 0 ? "Attraction Tour" : `Attraction Route ${index}`;
+        } else if (firstWaypoint.includes('amenity=cafe')) {
+          return index === 0 ? "Cafe Route" : `Cafe Stop ${index}`;
+        } else if (firstWaypoint.includes('tourism=viewpoint')) {
+          return index === 0 ? "Scenic Viewpoint" : `Viewpoint Route ${index}`;
+        } else if (firstWaypoint.includes('way ') || firstWaypoint.includes('node ')) {
+          return index === 0 ? "Scenic Path" : `Scenic Route ${index}`;
+        } else {
+          // Try to extract meaningful parts from OSM tags
+          const parts = firstWaypoint.split('=');
+          if (parts.length === 2) {
+            const category = parts[0];
+            const value = parts[1];
+            
+            if (category === 'leisure') {
+              return index === 0 ? `${value.charAt(0).toUpperCase() + value.slice(1)} Walk` : `${value.charAt(0).toUpperCase() + value.slice(1)} Route ${index}`;
+            } else if (category === 'tourism') {
+              return index === 0 ? `${value.charAt(0).toUpperCase() + value.slice(1)} Tour` : `${value.charAt(0).toUpperCase() + value.slice(1)} Route ${index}`;
+            } else if (category === 'amenity') {
+              return index === 0 ? `${value.charAt(0).toUpperCase() + value.slice(1)} Route` : `${value.charAt(0).toUpperCase() + value.slice(1)} Stop ${index}`;
+            }
+          }
+          
+          // Final fallback
+          return index === 0 ? "Scenic Route" : `Alternative ${index}`;
+        }
+      };
       
       return {
         id: route.id,
-        title: index === 0 ? "Most Scenic (AI)" : `Alternative ${index} (AI)`,
+        title: createRouteTitle(),
         score: route.score,
         duration: `${Math.round(route.duration_s / 60)} min`,
         distance: `${(route.distance_m / 1609).toFixed(1)} mi`,
         detour: detourText,
-        tags: route.features || [],
+        tags: friendlyFeatures,
         description: route.why || "AI-generated scenic route",
         waypoints: waypointNames,
         mapLinks: route.links,
+        // Use actual backend scoring data if available, otherwise estimate
         scoreBreakdown: {
-          scenic: (route.score * 0.95) / 100,  // Normalize to 0-1 scale
-          safety: (route.score * 0.85) / 100,
-          duration: (route.score * 0.80) / 100,
-          quiet: (route.score * 0.75) / 100,
+          scenic: Math.min(route.score / 10, 1.0),  // Normalize to 0-1 scale
+          safety: Math.min(route.score / 12, 1.0),
+          duration: Math.min(route.score / 15, 1.0),
+          quiet: Math.min(route.score / 8, 1.0),
+        },
+        // Add backend-specific data
+        backendData: {
+          rawScore: route.score,
+          waypointCount: route.coordinates.waypoints.length,
+          features: route.features,
+          coordinates: route.coordinates
         }
       };
     });
@@ -722,6 +832,12 @@ export function NaturalSearchFlow({
                     <Route className="w-4 h-4" />
                     <span>{route.distance}</span>
                   </div>
+                  {route.backendData && (
+                    <div className="flex items-center gap-1">
+                      <Star className="w-4 h-4" />
+                      <span>Score: {route.backendData.rawScore.toFixed(1)}</span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -734,17 +850,24 @@ export function NaturalSearchFlow({
               </div>
             </div>
 
-            {/* Description */}
-            <p className="text-sm text-gray-600 mb-3">
-              {route.description}
-            </p>
+            {/* AI Route Description - Show the "why" prominently */}
+            <div className="mb-3">
+              <p className="text-sm text-gray-600 font-medium">
+                {route.description}
+              </p>
+              {route.backendData && route.backendData.waypointCount > 0 && (
+                <p className="text-xs text-gray-500 mt-1">
+                  {route.backendData.waypointCount} waypoint{route.backendData.waypointCount !== 1 ? 's' : ''} included
+                </p>
+              )}
+            </div>
 
-            {/* Tags as Material 3 chips */}
+            {/* Features/Tags as Material 3 chips */}
             <div className="flex flex-wrap gap-1.5">
               {route.tags.map((tag, index) => (
                 <span
                   key={index}
-                  className="inline-block bg-gray-100 text-gray-700 rounded px-2 py-0.5 text-xs"
+                  className="inline-block bg-blue-50 text-blue-700 rounded px-2 py-0.5 text-xs font-medium"
                 >
                   {tag}
                 </span>
@@ -833,15 +956,91 @@ export function NaturalSearchFlow({
 
           <Separator />
 
-          {/* Description */}
+          {/* Why this route? - Clean description only */}
           <div>
             <h3 className="font-medium text-gray-900 mb-2">
-              About this route
+              Why this route?
             </h3>
             <p className="text-sm text-gray-600">
-              {route.description}
+              {route.backendData ? 
+                `This route takes you through ${route.backendData.waypointCount} scenic stop${route.backendData.waypointCount !== 1 ? 's' : ''} including ${route.backendData.features.map(f => f.includes('leisure=park') ? 'parks' : f.includes('tourism=attraction') ? 'attractions' : f).join(', ')}.` :
+                route.description?.replace('Route via ', 'This route passes through ').replace('leisure=park', 'parks').replace('way ', 'park area ') || 'AI-generated scenic route'
+              }
             </p>
           </div>
+
+          {/* Key waypoints - Minimal display */}
+          {route.waypoints && route.waypoints.length > 0 && (
+            <div>
+              <h3 className="font-medium text-gray-900 mb-3">
+                Key waypoints ({route.waypoints.length})
+              </h3>
+              <div className="space-y-2">
+                {route.waypoints.map((waypoint, index) => {
+                  const formatWaypointName = (name: string) => {
+                    // If the name is already user-friendly (doesn't contain OSM tags), use it as-is
+                    if (!name.includes('=') && !name.includes('way ') && !name.includes('node ')) {
+                      return name;
+                    }
+                    
+                    // Fallback for OSM-style names
+                    if (name.includes('leisure=park')) {
+                      return 'Park';
+                    } else if (name.includes('tourism=attraction')) {
+                      return 'Attraction';
+                    } else if (name.includes('way ') || name.includes('node ')) {
+                      return 'Scenic Area';
+                    } else {
+                      return name;
+                    }
+                  };
+                  
+                  const isExpanded = expandedWaypoints.has(index);
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="border border-gray-200 rounded-lg"
+                    >
+                      <button
+                        onClick={() => toggleWaypointExpansion(index)}
+                        className="w-full flex items-center justify-between p-3 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-medium text-blue-700">
+                            {index + 1}
+                          </div>
+                          <span className="text-sm font-medium text-gray-900">
+                            {formatWaypointName(waypoint)}
+                          </span>
+                        </div>
+                        <ChevronRight 
+                          className={`w-4 h-4 text-gray-400 transition-transform ${
+                            isExpanded ? 'rotate-90' : ''
+                          }`} 
+                        />
+                      </button>
+                      
+                      {isExpanded && (
+                        <div className="px-3 pb-3 border-t border-gray-100">
+                          <div className="pt-3 space-y-2">
+                            <div className="text-xs text-gray-500">
+                              {waypoint}
+                            </div>
+                            {route.backendData && route.backendData.coordinates.waypoints[index] && (
+                              <div className="text-xs text-gray-400">
+                                📍 {route.backendData.coordinates.waypoints[index].lat.toFixed(4)}, {route.backendData.coordinates.waypoints[index].lng.toFixed(4)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Map Links */}
           {route.mapLinks && (route.mapLinks.google || route.mapLinks.apple) && (
@@ -876,56 +1075,20 @@ export function NaturalSearchFlow({
             </div>
           )}
 
-          {/* Waypoints */}
-          {route.waypoints && route.waypoints.length > 0 && (
-            <div>
-              <h3 className="font-medium text-gray-900 mb-3">
-                Key waypoints
-              </h3>
-              <div className="space-y-2">
-                {route.waypoints.map((waypoint, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-3 text-sm"
-                  >
-                    <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
-                      {index + 1}
-                    </div>
-                    <span className="text-gray-900">{waypoint}</span>
-                  </div>
-                ))}
+          {/* AI Score - Single display at bottom */}
+          {route.backendData && (
+            <div className="p-4 bg-green-50 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <Star className="w-5 h-5 text-green-600" />
+                <span className="text-lg font-bold text-green-900">
+                  AI Score: {route.backendData.rawScore.toFixed(1)}/100
+                </span>
               </div>
+              <p className="text-sm text-green-700">
+                Based on waypoint relevance, route efficiency, and scenic value
+              </p>
             </div>
           )}
-
-          {/* Score breakdown */}
-          <div>
-            <h3 className="font-medium text-gray-900 mb-3">
-              Score breakdown
-            </h3>
-            <div className="space-y-3">
-              {Object.entries(route.scoreBreakdown).map(
-                ([key, value]) => (
-                  <div key={key}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-gray-700 capitalize">
-                        {key}
-                      </span>
-                      <span className="text-sm font-medium text-gray-900">
-                        {(value * 10).toFixed(1)}/10
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-[#1A73E8] h-2 rounded-full transition-all"
-                        style={{ width: `${value * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
 
           {/* Tags */}
           {route.tags && route.tags.length > 0 && (

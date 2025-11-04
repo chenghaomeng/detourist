@@ -165,6 +165,9 @@ class Geocoder:
         """
         base = self.shortest_travel_time_minutes(origin, destination, transport_mode)
         max_travel_time = base + int(max_additional_time)
+        
+        # Cap at 60 minutes to respect Mapbox isochrone API limits
+        max_travel_time = min(max_travel_time, 60)
 
         # choose combo schedule
         if base > 60:
@@ -210,6 +213,9 @@ class Geocoder:
     # ---------------- Helpers ----------------
     def _iso_geom(self, center: Coordinates, minutes: int, transport_mode: str):
         """Return shapely geometry for an isochrone; tiny buffer for 0 minutes."""
+        # Cap at 60 minutes to respect Mapbox isochrone API limits
+        minutes = min(minutes, 60)
+        
         if minutes <= 0:
             return Point(center.longitude, center.latitude).buffer(1e-6)
         iso = self.create_isochrone(center, minutes, transport_mode)

@@ -15,13 +15,12 @@ from PIL import Image
 from io import BytesIO
 import torch
 from transformers import CLIPProcessor, CLIPModel
+import logging
 
 try:
     from mapillary import interface as mapillary_interface
 except ImportError:
     mapillary_interface = None
-    print("Warning: Mapillary SDK not installed. Image scoring will be disabled.")
-    print("Install with: pip install mapillary")
 
 try:
     from backend.routing.route_builder import Route, RouteSegment
@@ -81,18 +80,22 @@ class RouteScorer:
         self.weights = weights or ScoringWeights()
         self.mapillary_token = mapillary_token
         self.waypoint_bonus_rate = waypoint_bonus_rate
+        self.logger = logging.getLogger(__name__)
 
         # Set up Mapillary SDK if available
         if mapillary_token and mapillary_interface:
             mapillary_interface.set_access_token(mapillary_token)
+        elif not mapillary_interface:
+            self.logger.warning("Mapillary SDK not installed. Image scoring will be disabled. Install with: pip install mapillary")
 
         # Load CLIP model
-        print(f"Loading CLIP model: {clip_model_name}")
+        self.logger.info(f"Loading CLIP model: {clip_model_name}")
         self.clip_model = CLIPModel.from_pretrained(clip_model_name)
         self.clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.clip_model.to(self.device)
         self.clip_model.eval()
+        self.logger.info(f"CLIP model loaded successfully on {self.device}")
 
     def score_routes(
         self,
@@ -128,7 +131,7 @@ class RouteScorer:
         route_clip_scores = []
         for i, route in enumerate(routes):
             if debug:
-                print(f"\nRoute {i+1}:")
+                self.logger.debug(f"Processing route {i+1}")
 
             images = self._fetch_route_images(
                 route,
@@ -203,32 +206,32 @@ class RouteScorer:
         sample_points = self._sample_route_points(route, max_images)
 
         if debug:
-            print(f"  Sampling {len(sample_points)} points along route...")
+            self.logger.debug(f"Sampling {len(sample_points)} points along route...")
 
         for i, coords in enumerate(sample_points):
             try:
                 if debug:
-                    print(f"  Point {i+1}/{len(sample_points)}: ({coords.latitude:.4f}, {coords.longitude:.4f})", end=" ")
+                    self.logger.debug(f"Point {i+1}/{len(sample_points)}: ({coords.latitude:.4f}, {coords.longitude:.4f})")
 
                 img = self._fetch_image_at_location(coords, debug=debug)
 
                 if img is not None:
                     images.append(img)
                     if debug:
-                        print("✓ Image found")
+                        self.logger.debug("✓ Image found")
                 else:
                     if debug:
-                        print("✗ No image")
+                        self.logger.debug("✗ No image")
 
                 if len(images) >= max_images:
                     break
             except Exception as e:
                 if debug:
-                    print(f"✗ Error: {e}")
+                    self.logger.debug(f"✗ Error: {e}")
                 continue
 
         if debug:
-            print(f"  Total images fetched: {len(images)}")
+            self.logger.debug(f"Total images fetched: {len(images)}")
 
         return images
 
@@ -279,7 +282,7 @@ class RouteScorer:
             # Check if we found any images
             if not result or not hasattr(result, 'features') or not result.features:
                 if debug:
-                    print("(no images)", end=" ")
+                    self.logger.debug("(no images)")
                 return None
 
             # Get the first image ID
@@ -313,7 +316,7 @@ class RouteScorer:
 
         except Exception as e:
             if debug:
-                print(f"(error: {str(e)[:20]})", end=" ")
+                self.logger.debug(f"(error: {str(e)[:20]})")
             return None
 
     def _compute_clip_scores(
@@ -368,7 +371,7 @@ class RouteScorer:
                 return scores
 
         except Exception as e:
-            print(f"CLIP scoring error: {e}")
+            self.logger.error(f"CLIP scoring error: {e}")
             return [0.0] * len(images)
 
     def _calculate_efficiency_score(
@@ -385,7 +388,7 @@ class RouteScorer:
         - Routes taking 2x minimum duration get score of ~20
         """
         duration = route.total_duration_seconds
-        print(duration, min_duration)
+        self.logger.debug(f"Calculating efficiency: route_duration={duration}s, min_duration={min_duration}s, ratio={duration/min_duration:.2f}")
         if min_duration <= 0:
             return 100.0
 

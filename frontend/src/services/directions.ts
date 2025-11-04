@@ -55,6 +55,45 @@ export async function getDirections(
 }
 
 /**
+ * Convert backend route data to Google Maps DirectionsResult
+ * @param backendRoute - Route data from backend API
+ * @returns Google Maps DirectionsResult
+ */
+export async function convertBackendRouteToDirections(
+  backendRoute: any
+): Promise<google.maps.DirectionsResult> {
+  return new Promise((resolve, reject) => {
+    const directionsService = new google.maps.DirectionsService();
+    
+    const request: google.maps.DirectionsRequest = {
+      origin: new google.maps.LatLng(
+        backendRoute.coordinates.origin.lat,
+        backendRoute.coordinates.origin.lng
+      ),
+      destination: new google.maps.LatLng(
+        backendRoute.coordinates.destination.lat,
+        backendRoute.coordinates.destination.lng
+      ),
+      waypoints: backendRoute.coordinates.waypoints.map((wp: any) => ({
+        location: new google.maps.LatLng(wp.lat, wp.lng),
+        stopover: true
+      })),
+      travelMode: google.maps.TravelMode.DRIVING,
+      optimizeWaypoints: false,
+      provideRouteAlternatives: false,
+    };
+
+    directionsService.route(request, (result, status) => {
+      if (status === google.maps.DirectionsStatus.OK && result) {
+        resolve(result);
+      } else {
+        reject(new Error(`Directions request failed: ${status}`));
+      }
+    });
+  });
+}
+
+/**
  * Get multiple route alternatives from Google Maps Directions API
  * @param origin - Starting location
  * @param destination - Ending location

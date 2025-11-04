@@ -27,6 +27,11 @@ export interface BackendRoute {
   geometry: any;
   features: string[];
   links: { google?: string; apple?: string; };
+  coordinates: {
+    origin: { lat: number; lng: number; };
+    destination: { lat: number; lng: number; };
+    waypoints: Array<{ lat: number; lng: number; name: string; }>;
+  };
   why: string;
   distance_m: number;
   duration_s: number;
