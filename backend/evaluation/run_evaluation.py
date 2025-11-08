@@ -10,6 +10,7 @@ Usage:
 
 Environment Variables:
     ROUTING_API_KEY: Mapbox API key for routing (required)
+    GEOCODING_API_KEY: Mapbox API key for geocoding (defaults to ROUTING_API_KEY)
     LLM_API_KEY: Optional LLM API key (for future providers)
     MAPILLARY_TOKEN: Optional Mapillary token for image scoring
     CLIP_MODEL_NAME: CLIP model name (default: openai/clip-vit-base-patch32)
@@ -361,6 +362,7 @@ def main():
         print("   Set it with: export ROUTING_API_KEY=your-mapbox-key")
         sys.exit(1)
     
+    geocoding_api_key = os.getenv("GEOCODING_API_KEY") or routing_api_key
     llm_api_key = os.getenv("LLM_API_KEY", "")
     mapillary_token = os.getenv("MAPILLARY_TOKEN")
     clip_model_name = os.getenv("CLIP_MODEL_NAME", "openai/clip-vit-base-patch32")
@@ -369,6 +371,7 @@ def main():
     print("🚀 Initializing Route Evaluator...")
     evaluator = RouteEvaluator(
         routing_api_key=routing_api_key,
+        geocoding_api_key=geocoding_api_key,
         llm_api_key=llm_api_key,
         clip_model_name=clip_model_name,
         mapillary_token=mapillary_token,

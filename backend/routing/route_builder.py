@@ -123,6 +123,32 @@ class RouteBuilder:
         routes.sort(key=lambda r: r.total_duration_seconds)
         return routes
 
+    def build_single_route(
+        self,
+        origin: Coordinates,
+        destination: Coordinates,
+        waypoints: List[Waypoint],
+        constraints: Dict[str, bool],
+        optimize_order: bool = True,
+    ) -> Route:
+        """
+        Build a single route using ALL provided waypoints.
+        
+        This is useful for ground truth routes where you want a definitive route
+        that uses all waypoints, rather than selecting from multiple candidates.
+        
+        Args:
+            origin: Starting point coordinates
+            destination: Ending point coordinates
+            waypoints: All waypoints to include in the route
+            constraints: Routing constraints
+            optimize_order: Whether to optimize waypoint order for efficiency (default: True)
+            
+        Returns:
+            A single Route object using all provided waypoints
+        """
+        return self._build_multi_route(origin, destination, waypoints, constraints, optimize_order)
+
     # ----------------------- Internals -----------------------
 
     def _build_multi_route(

@@ -17,8 +17,8 @@ from nltk.corpus import wordnet as wn
 import nltk
 from sentence_transformers import SentenceTransformer
 
-from backend.geocoding.geocoder import Coordinates
-from backend.waypoints.waypoint_searcher import Waypoint
+from backend.geocoding.geocoder import Coordinates, Geocoder
+from backend.waypoints.waypoint_searcher import Waypoint, WaypointSearcher
 from backend.routing.route_builder import RouteBuilder
 from backend.scoring.route_scorer import RouteScorer, RouteScore
 from backend.extraction.llm_extractor import LLMExtractor, ExtractedParameters
@@ -144,6 +144,7 @@ class RouteEvaluator:
         clip_model_name: str = "openai/clip-vit-base-patch32",
         mapillary_token: Optional[str] = None,
         embedding_model_name: str = "all-MiniLM-L6-v2",
+        geocoding_api_key: Optional[str] = None,
     ):
         """
         Initialize the evaluator with required API keys and configuration.
@@ -154,8 +155,12 @@ class RouteEvaluator:
             clip_model_name: CLIP model name for scoring (default: openai/clip-vit-base-patch32)
             mapillary_token: Optional Mapillary token for image fetching
             embedding_model_name: Sentence transformer model for semantic similarity (default: all-MiniLM-L6-v2)
+            geocoding_api_key: Mapbox API key for geocoding (defaults to routing_api_key)
         """
         self.llm_extractor = LLMExtractor(llm_api_key)
+        geocoding_key = geocoding_api_key or routing_api_key
+        self.geocoder = Geocoder(geocoding_key)
+        self.waypoint_searcher = WaypointSearcher("")  # Overpass doesn't need API key
         self.route_builder = RouteBuilder(routing_api_key)
         self.route_scorer = RouteScorer(
             clip_model_name=clip_model_name,
@@ -464,20 +469,43 @@ class RouteEvaluator:
             self.logger.info("Step 2: Comparing LLM extraction with ground truth")
             extraction_comparison = self._compare_extraction(llm_params, example)
 
-            # Step 3: Build routes from LLM extraction (using ground truth waypoints)
-            self.logger.info("Step 3: Building routes from LLM extraction")
-            llm_waypoints = [
-                self._coords_to_waypoint(coords, i, source="llm_extraction")
-                for i, coords in enumerate(example.waypoint_coords)
-            ]
-
+            # Step 3: Build routes from LLM extraction (using app's full process)
+            self.logger.info("Step 3: Building routes from LLM extraction (full app process)")
+            
+            # 3a) Geocode LLM-extracted origin/destination
+            self.logger.info("Step 3a: Geocoding LLM-extracted origin and destination")
+            llm_origin_coords = self.geocoder.geocode_address(llm_params.origin)
+            llm_dest_coords = self.geocoder.geocode_address(llm_params.destination)
+            
+            # 3b) Create search zone
+            self.logger.info("Step 3b: Creating search zone")
+            max_additional_minutes = llm_params.time_flexibility_minutes or 30
+            transport_mode = (llm_params.constraints or {}).get("transport_mode", "walking")
+            search_zone = self.geocoder.create_search_zone(
+                origin=llm_origin_coords,
+                destination=llm_dest_coords,
+                max_additional_time=int(max_additional_minutes),
+                transport_mode=transport_mode,
+            )
+            
+            # 3c) Search for waypoints using LLM-extracted queries
+            self.logger.info("Step 3c: Searching for waypoints using LLM queries: %s", llm_params.waypoint_queries)
+            found_waypoints = self.waypoint_searcher.search_waypoints(
+                search_zone,
+                llm_params.waypoint_queries or [],
+            )
+            self.logger.info("Step 3c: Found %d waypoints", len(found_waypoints))
+            
+            # 3d) Build routes using found waypoints
+            self.logger.info("Step 3d: Building routes from found waypoints")
             llm_routes = self.route_builder.build_routes(
-                origin=example.origin_coords,  # Use ground truth coords
-                destination=example.destination_coords,  # Use ground truth coords
-                waypoints=llm_waypoints,
-                constraints=llm_params.constraints,  # Use LLM-extracted constraints
+                origin=llm_origin_coords,
+                destination=llm_dest_coords,
+                waypoints=found_waypoints,
+                constraints=llm_params.constraints,
             )
             llm_routes = llm_routes[:max_routes]
+            self.logger.info("Step 3d: Built %d candidate routes", len(llm_routes))
 
             # Score LLM routes
             self.logger.info("Step 3.5: Scoring LLM routes")
@@ -499,20 +527,22 @@ class RouteEvaluator:
                 llm_scored[0].clip_score if llm_scored else 0.0,
             )
 
-            # Step 4: Build routes from ground truth
-            self.logger.info("Step 4: Building routes from ground truth")
+            # Step 4: Build ground truth route (single route using ALL provided waypoints)
+            self.logger.info("Step 4: Building ground truth route (using all %d waypoints)", len(example.waypoint_coords))
             gt_waypoints = [
                 self._coords_to_waypoint(coords, i, source="ground_truth")
                 for i, coords in enumerate(example.waypoint_coords)
             ]
 
-            gt_routes = self.route_builder.build_routes(
+            # Build a single definitive route using all waypoints (optimize order for efficiency)
+            gt_route = self.route_builder.build_single_route(
                 origin=example.origin_coords,
                 destination=example.destination_coords,
                 waypoints=gt_waypoints,
                 constraints=example.constraints,  # Use ground truth constraints
+                optimize_order=True,  # Optimize waypoint order for efficiency
             )
-            gt_routes = gt_routes[:max_routes]
+            gt_routes = [gt_route]  # Single definitive route
 
             # Score ground truth routes
             self.logger.info("Step 4.5: Scoring ground truth routes")
