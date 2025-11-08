@@ -23,7 +23,6 @@ def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: l
     IMPORTANT:
     - waypoint_queries MUST be selected from this candidate list (exact key=value matches).
     - Return ONLY JSON, no backticks, no prose.
-    - when extracting the origin and destination, look for the full address including the city or town.
     """
 
     candidates_block = "\n".join(f"- {c}" for c in candidate_tags)
@@ -50,4 +49,8 @@ Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
     "transport_mode": "walking"
   }}
 }}
+
+IMPORTANT:
+- waypoint_queries MUST be selected from the candidate list (exact key=value matches).
+- when extracting the origin and destination, always look for the full address including the city or town.
 """
