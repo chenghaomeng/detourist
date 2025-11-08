@@ -225,6 +225,7 @@ class RouteOrchestrator:
                         "time_flexibility_minutes": ep.time_flexibility_minutes,
                         "waypoint_queries": ep.waypoint_queries,
                         "constraints": ep.constraints,
+                        "preferences": ep.preferences,
                     },
                     ttl_seconds=1800,
                 )
