@@ -351,22 +351,27 @@ class RouteEvaluator:
     def _compare_constraints(
         self, llm_constraints: Dict[str, Any], gt_constraints: Dict[str, Any]
     ) -> bool:
-        """Compare constraints dictionaries."""
-        # Normalize transport_mode
-        llm_mode = str(llm_constraints.get("transport_mode", "walking")).lower()
-        gt_mode = str(gt_constraints.get("transport_mode", "walking")).lower()
-
-        # Compare boolean constraints
-        bool_keys = ["avoid_tolls", "avoid_stairs", "avoid_hills", "avoid_highways"]
-        for key in bool_keys:
-            if bool(llm_constraints.get(key, False)) != bool(gt_constraints.get(key, False)):
-                return False
-
-        # Compare transport mode
-        if llm_mode != gt_mode:
-            return False
-
-        return True
+        """
+        Compare constraints dictionaries (order-invariant).
+        
+        Normalizes and compares constraint values regardless of dictionary key order.
+        """
+        # Normalize both dictionaries to ensure consistent comparison
+        def normalize_constraints(constraints: Dict[str, Any]) -> Dict[str, Any]:
+            """Normalize constraints to a canonical form."""
+            normalized = {}
+            # Normalize transport_mode
+            normalized["transport_mode"] = str(constraints.get("transport_mode", "walking")).lower()
+            # Normalize boolean constraints
+            for key in ["avoid_tolls", "avoid_stairs", "avoid_hills", "avoid_highways"]:
+                normalized[key] = bool(constraints.get(key, False))
+            return normalized
+        
+        llm_norm = normalize_constraints(llm_constraints)
+        gt_norm = normalize_constraints(gt_constraints)
+        
+        # Compare normalized dictionaries (order-invariant)
+        return llm_norm == gt_norm
 
     def _compare_preferences(
         self, llm_preferences: str, gt_preferences: str

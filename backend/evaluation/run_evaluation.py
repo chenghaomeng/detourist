@@ -128,7 +128,7 @@ def format_result_summary(result: EvaluationResult) -> str:
         lines.append(f"    - Preference Match: {best_gt.preference_match_score:.3f}")
         lines.append(f"    - Images Used:      {best_gt.num_images}")
     
-    # Waypoint comparison
+    # Waypoint comparison (informational - just show what was found)
     if result.llm_routes and result.ground_truth_routes:
         lines.append("\n📍 Waypoint Comparison:")
         best_llm_route = result.llm_routes[0].route
@@ -137,53 +137,25 @@ def format_result_summary(result: EvaluationResult) -> str:
         llm_waypoints = best_llm_route.waypoints
         gt_waypoints = best_gt_route.waypoints
         
-        max_waypoints = max(len(llm_waypoints), len(gt_waypoints))
-        
         lines.append(f"  LLM Route Waypoints:     {len(llm_waypoints)}")
-        lines.append(f"  Ground Truth Waypoints:  {len(gt_waypoints)}")
-        lines.append("")
+        if llm_waypoints:
+            for i, wp in enumerate(llm_waypoints, 1):
+                lines.append(
+                    f"    {i}. ({wp.coordinates.latitude:.6f}, {wp.coordinates.longitude:.6f}) "
+                    f"\"{wp.name}\""
+                )
+        else:
+            lines.append("    (none)")
         
-        for i in range(max_waypoints):
-            if i < len(llm_waypoints) and i < len(gt_waypoints):
-                llm_wp = llm_waypoints[i]
-                gt_wp = gt_waypoints[i]
-                llm_coords = llm_wp.coordinates
-                gt_coords = gt_wp.coordinates
-                
-                # Check if coordinates match (within small tolerance)
-                coord_match = (
-                    abs(llm_coords.latitude - gt_coords.latitude) < 0.0001 and
-                    abs(llm_coords.longitude - gt_coords.longitude) < 0.0001
-                )
-                status = "✅" if coord_match else "❌"
-                
-                lines.append(f"  {status} Waypoint {i+1}:")
+        lines.append(f"  Ground Truth Waypoints:  {len(gt_waypoints)}")
+        if gt_waypoints:
+            for i, wp in enumerate(gt_waypoints, 1):
                 lines.append(
-                    f"      LLM:      ({llm_coords.latitude:.6f}, {llm_coords.longitude:.6f}) "
-                    f"\"{llm_wp.name}\""
+                    f"    {i}. ({wp.coordinates.latitude:.6f}, {wp.coordinates.longitude:.6f}) "
+                    f"\"{wp.name}\""
                 )
-                lines.append(
-                    f"      Expected: ({gt_coords.latitude:.6f}, {gt_coords.longitude:.6f}) "
-                    f"\"{gt_wp.name}\""
-                )
-            elif i < len(llm_waypoints):
-                llm_wp = llm_waypoints[i]
-                llm_coords = llm_wp.coordinates
-                lines.append(f"  ❌ Waypoint {i+1}:")
-                lines.append(
-                    f"      LLM:      ({llm_coords.latitude:.6f}, {llm_coords.longitude:.6f}) "
-                    f"\"{llm_wp.name}\""
-                )
-                lines.append("      Expected: (missing)")
-            else:
-                gt_wp = gt_waypoints[i]
-                gt_coords = gt_wp.coordinates
-                lines.append(f"  ❌ Waypoint {i+1}:")
-                lines.append("      LLM:      (missing)")
-                lines.append(
-                    f"      Expected: ({gt_coords.latitude:.6f}, {gt_coords.longitude:.6f}) "
-                    f"\"{gt_wp.name}\""
-                )
+        else:
+            lines.append("    (none)")
     
     return "\n".join(lines)
 
