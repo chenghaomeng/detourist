@@ -20,10 +20,10 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 1: San Francisco - Parks and Greenery
         GroundTruthExample(
             example_id="sf_parks_001",
-            user_prompt="Take me from Union Square to Golden Gate Park, avoiding hills and stairs. I want to see some parks along the way.",
-            origin_text="Union Square",
+            user_prompt="Take me from Union Square to Golden Gate Park in San Francisco, avoiding hills and stairs. I want to see some parks along the way.",
+            origin_text="Union Square, San Francisco",
             origin_coords=Coordinates(latitude=37.7880, longitude=-122.4075),
-            destination_text="Golden Gate Park",
+            destination_text="Golden Gate Park, San Francisco",
             destination_coords=Coordinates(latitude=37.7694, longitude=-122.4862),
             time_flexibility_minutes=15,
             constraints={
@@ -43,10 +43,10 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 2: New York - Coffee Shops
         GroundTruthExample(
             example_id="ny_coffee_001",
-            user_prompt="I need to get from my hotel near Times Square to Central Park, but I'd love a route that passes by some good coffee shops. I can spare 20 extra minutes.",
-            origin_text="Times Square",
+            user_prompt="I need to get from my hotel near Times Square to Central Park in New York, but I'd love a route that passes by some good coffee shops. I can spare 20 extra minutes.",
+            origin_text="Times Square, New York",
             origin_coords=Coordinates(latitude=40.7580, longitude=-73.9855),
-            destination_text="Central Park",
+            destination_text="Central Park, New York",
             destination_coords=Coordinates(latitude=40.7829, longitude=-73.9654),
             time_flexibility_minutes=20,
             constraints={
