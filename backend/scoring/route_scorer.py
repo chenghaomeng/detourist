@@ -137,13 +137,32 @@ class RouteScorer:
                     max_images=max_images_per_route,
                     debug=debug,
                 )
+                if debug:
+                    logger.debug(f"[scoring] Route {i+1}: fetched {len(images)} images")
+            else:
+                if debug:
+                    if not self.enable_scoring:
+                        logger.debug(f"[scoring] Route {i+1}: CLIP disabled (ENABLE_SCORING=false)")
+                    elif not self.mapillary_token:
+                        logger.debug(f"[scoring] Route {i+1}: No Mapillary token")
+                    elif max_images_per_route == 0:
+                        logger.debug(f"[scoring] Route {i+1}: max_images_per_route=0")
 
             if images:
                 image_scores = self._compute_clip_scores(images, user_prompt)
                 clip_score = float(np.mean(image_scores)) if image_scores else 0.0
+                if debug:
+                    logger.debug(
+                        "[scoring] Route %d: CLIP score=%.3f (from %d images)",
+                        i + 1,
+                        clip_score,
+                        len(image_scores),
+                )
             else:
                 image_scores = []
                 clip_score = 0.0
+                if debug:
+                    logger.debug(f"[scoring] Route {i+1}: CLIP score=0.0 (no images)")
 
             route_clip_scores.append((clip_score, image_scores))
             max_clip_score = max(max_clip_score, clip_score)

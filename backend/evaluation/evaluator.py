@@ -8,21 +8,20 @@ by comparing LLM-extracted routes with ground truth routes.
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import logging
+import os
 import time
 import re
+import numpy as np
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import wordnet as wn
+import nltk
+from sentence_transformers import SentenceTransformer
 
 from backend.geocoding.geocoder import Coordinates
 from backend.waypoints.waypoint_searcher import Waypoint
 from backend.routing.route_builder import RouteBuilder
 from backend.scoring.route_scorer import RouteScorer, RouteScore
 from backend.extraction.llm_extractor import LLMExtractor, ExtractedParameters
-
-# Required libraries for preference comparison
-import numpy as np
-from nltk.stem import WordNetLemmatizer
-from nltk.corpus import wordnet as wn
-import nltk
-from sentence_transformers import SentenceTransformer
 
 # Download required NLTK data on first use (if not already downloaded)
 try:
@@ -102,6 +101,7 @@ class EvaluationResult:
         ground_truth_routes: List of routes generated from ground truth
         processing_time_seconds: Time taken to process this example
         num_waypoints_provided: Number of waypoints in the ground truth
+        ground_truth: The ground truth example (for displaying comparison values)
         error: Optional error message if evaluation failed
     """
     example_id: Optional[str]
@@ -114,6 +114,7 @@ class EvaluationResult:
     ground_truth_routes: List[RouteScore] = None
     processing_time_seconds: float = 0.0
     num_waypoints_provided: int = 0
+    ground_truth: Optional[GroundTruthExample] = None
     error: Optional[str] = None
 
     def __post_init__(self):
@@ -479,11 +480,24 @@ class RouteEvaluator:
             llm_routes = llm_routes[:max_routes]
 
             # Score LLM routes
+            self.logger.info("Step 3.5: Scoring LLM routes")
+            # Use reasonable image limits for evaluation (if CLIP scoring is enabled)
+            use_images = os.getenv("ENABLE_SCORING", "false").lower() == "true"
+            min_imgs = int(os.getenv("SCORING_MIN_IMAGES", "3" if use_images else "0"))
+            max_imgs = int(os.getenv("SCORING_MAX_IMAGES", "6" if use_images else "0"))
             llm_scored = self.route_scorer.score_routes(
                 routes=llm_routes,
                 user_prompt=example.user_prompt,
+                min_images_per_route=min_imgs,
+                max_images_per_route=max_imgs,
             )
             llm_best_score = llm_scored[0].overall_score if llm_scored else 0.0
+            self.logger.info(
+                "LLM routes scored: %d routes, best score=%.3f, best CLIP=%.3f",
+                len(llm_scored),
+                llm_best_score,
+                llm_scored[0].clip_score if llm_scored else 0.0,
+            )
 
             # Step 4: Build routes from ground truth
             self.logger.info("Step 4: Building routes from ground truth")
@@ -501,11 +515,21 @@ class RouteEvaluator:
             gt_routes = gt_routes[:max_routes]
 
             # Score ground truth routes
+            self.logger.info("Step 4.5: Scoring ground truth routes")
+            # Use same image limits as LLM routes
             gt_scored = self.route_scorer.score_routes(
                 routes=gt_routes,
                 user_prompt=example.user_prompt,
+                min_images_per_route=min_imgs,
+                max_images_per_route=max_imgs,
             )
             gt_best_score = gt_scored[0].overall_score if gt_scored else 0.0
+            self.logger.info(
+                "GT routes scored: %d routes, best score=%.3f, best CLIP=%.3f",
+                len(gt_scored),
+                gt_best_score,
+                gt_scored[0].clip_score if gt_scored else 0.0,
+            )
 
             # Step 5: Compare scores
             score_comparison = llm_best_score >= gt_best_score
@@ -531,6 +555,7 @@ class RouteEvaluator:
                 ground_truth_routes=gt_scored,
                 processing_time_seconds=processing_time,
                 num_waypoints_provided=len(example.waypoint_coords),
+                ground_truth=example,
             )
 
         except Exception as e:

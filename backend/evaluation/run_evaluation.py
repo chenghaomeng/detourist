@@ -45,14 +45,45 @@ def format_result_summary(result: EvaluationResult) -> str:
         return "\n".join(lines)
     
     # Extraction comparison
-    if result.extraction_comparison:
+    if result.extraction_comparison and result.llm_extracted_params:
         comp = result.extraction_comparison
+        llm_params = result.llm_extracted_params
         lines.append("\n📊 Extraction Comparison:")
-        lines.append(f"  ✓ Origin: {comp.origin_match}")
-        lines.append(f"  ✓ Destination: {comp.destination_match}")
-        lines.append(f"  ✓ Time flexibility: {comp.time_flexibility_match}")
-        lines.append(f"  ✓ Constraints: {comp.constraints_match}")
-        lines.append(f"  ✓ Preferences: {comp.preferences_match}")
+        
+        # Origin
+        status = "✅" if comp.origin_match else "❌"
+        lines.append(f"  {status} Origin: {comp.origin_match}")
+        gt_origin = result.ground_truth.origin_text if result.ground_truth else "N/A"
+        lines.append(f"      LLM:      \"{llm_params.origin}\"")
+        lines.append(f"      Expected: \"{gt_origin}\"")
+        
+        # Destination
+        status = "✅" if comp.destination_match else "❌"
+        lines.append(f"  {status} Destination: {comp.destination_match}")
+        gt_dest = result.ground_truth.destination_text if result.ground_truth else "N/A"
+        lines.append(f"      LLM:      \"{llm_params.destination}\"")
+        lines.append(f"      Expected: \"{gt_dest}\"")
+        
+        # Time flexibility
+        status = "✅" if comp.time_flexibility_match else "❌"
+        lines.append(f"  {status} Time flexibility: {comp.time_flexibility_match}")
+        gt_time = result.ground_truth.time_flexibility_minutes if result.ground_truth else "N/A"
+        lines.append(f"      LLM:      {llm_params.time_flexibility_minutes} minutes")
+        lines.append(f"      Expected: {gt_time} minutes")
+        
+        # Constraints
+        status = "✅" if comp.constraints_match else "❌"
+        lines.append(f"  {status} Constraints: {comp.constraints_match}")
+        gt_constraints = result.ground_truth.constraints if result.ground_truth else "N/A"
+        lines.append(f"      LLM:      {llm_params.constraints}")
+        lines.append(f"      Expected: {gt_constraints}")
+        
+        # Preferences
+        status = "✅" if comp.preferences_match else "❌"
+        lines.append(f"  {status} Preferences: {comp.preferences_match}")
+        gt_prefs = result.ground_truth.preferences if result.ground_truth else "N/A"
+        lines.append(f"      LLM:      \"{llm_params.preferences}\"")
+        lines.append(f"      Expected: \"{gt_prefs}\"")
         
         # Calculate extraction accuracy
         matches = sum([
@@ -95,6 +126,63 @@ def format_result_summary(result: EvaluationResult) -> str:
         lines.append(f"    - Efficiency:       {best_gt.efficiency_score:.3f}")
         lines.append(f"    - Preference Match: {best_gt.preference_match_score:.3f}")
         lines.append(f"    - Images Used:      {best_gt.num_images}")
+    
+    # Waypoint comparison
+    if result.llm_routes and result.ground_truth_routes:
+        lines.append("\n📍 Waypoint Comparison:")
+        best_llm_route = result.llm_routes[0].route
+        best_gt_route = result.ground_truth_routes[0].route
+        
+        llm_waypoints = best_llm_route.waypoints
+        gt_waypoints = best_gt_route.waypoints
+        
+        max_waypoints = max(len(llm_waypoints), len(gt_waypoints))
+        
+        lines.append(f"  LLM Route Waypoints:     {len(llm_waypoints)}")
+        lines.append(f"  Ground Truth Waypoints:  {len(gt_waypoints)}")
+        lines.append("")
+        
+        for i in range(max_waypoints):
+            if i < len(llm_waypoints) and i < len(gt_waypoints):
+                llm_wp = llm_waypoints[i]
+                gt_wp = gt_waypoints[i]
+                llm_coords = llm_wp.coordinates
+                gt_coords = gt_wp.coordinates
+                
+                # Check if coordinates match (within small tolerance)
+                coord_match = (
+                    abs(llm_coords.latitude - gt_coords.latitude) < 0.0001 and
+                    abs(llm_coords.longitude - gt_coords.longitude) < 0.0001
+                )
+                status = "✅" if coord_match else "❌"
+                
+                lines.append(f"  {status} Waypoint {i+1}:")
+                lines.append(
+                    f"      LLM:      ({llm_coords.latitude:.6f}, {llm_coords.longitude:.6f}) "
+                    f"\"{llm_wp.name}\""
+                )
+                lines.append(
+                    f"      Expected: ({gt_coords.latitude:.6f}, {gt_coords.longitude:.6f}) "
+                    f"\"{gt_wp.name}\""
+                )
+            elif i < len(llm_waypoints):
+                llm_wp = llm_waypoints[i]
+                llm_coords = llm_wp.coordinates
+                lines.append(f"  ❌ Waypoint {i+1}:")
+                lines.append(
+                    f"      LLM:      ({llm_coords.latitude:.6f}, {llm_coords.longitude:.6f}) "
+                    f"\"{llm_wp.name}\""
+                )
+                lines.append("      Expected: (missing)")
+            else:
+                gt_wp = gt_waypoints[i]
+                gt_coords = gt_wp.coordinates
+                lines.append(f"  ❌ Waypoint {i+1}:")
+                lines.append("      LLM:      (missing)")
+                lines.append(
+                    f"      Expected: ({gt_coords.latitude:.6f}, {gt_coords.longitude:.6f}) "
+                    f"\"{gt_wp.name}\""
+                )
     
     return "\n".join(lines)
 
