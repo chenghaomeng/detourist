@@ -52,5 +52,5 @@ Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
 
 IMPORTANT:
 - waypoint_queries MUST be selected from the candidate list (exact key=value matches).
-- when extracting the origin and destination, always look for the full address including the city or town.
+- when extracting the origin and destination, always be as specific as possible and include the city or town.
 """
