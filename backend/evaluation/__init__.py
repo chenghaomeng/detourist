@@ -5,6 +5,9 @@ from backend.evaluation.evaluator import (
     ExtractionComparison,
     EvaluationResult,
     RouteEvaluator,
+    ScoringRouteInput,
+    ScoringGroundTruthExample,
+    ScoringEvaluationResult,
 )
 
 __all__ = [
@@ -12,5 +15,8 @@ __all__ = [
     "ExtractionComparison",
     "EvaluationResult",
     "RouteEvaluator",
+    "ScoringRouteInput",
+    "ScoringGroundTruthExample",
+    "ScoringEvaluationResult",
 ]
 

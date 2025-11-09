@@ -19,7 +19,7 @@ from sentence_transformers import SentenceTransformer
 
 from backend.geocoding.geocoder import Coordinates, Geocoder
 from backend.waypoints.waypoint_searcher import Waypoint, WaypointSearcher
-from backend.routing.route_builder import RouteBuilder
+from backend.routing.route_builder import RouteBuilder, Route
 from backend.scoring.route_scorer import RouteScorer, RouteScore
 from backend.extraction.llm_extractor import LLMExtractor, ExtractedParameters
 
@@ -123,6 +123,70 @@ class EvaluationResult:
             self.llm_routes = []
         if self.ground_truth_routes is None:
             self.ground_truth_routes = []
+
+
+@dataclass
+class ScoringRouteInput:
+    """
+    A single route input for scoring evaluation.
+    
+    Attributes:
+        origin: Origin coordinates
+        destination: Destination coordinates
+        waypoint_coords: List of waypoint coordinates
+        constraints: Routing constraints
+    """
+    origin: Coordinates
+    destination: Coordinates
+    waypoint_coords: List[Coordinates]
+    constraints: Dict[str, Any]
+
+
+@dataclass
+class ScoringGroundTruthExample:
+    """
+    A ground truth example for scoring evaluation.
+    
+    Contains multiple route inputs and indicates which is the best route.
+    
+    Attributes:
+        example_id: Optional identifier for this example
+        route_inputs: List of route inputs to evaluate
+        best_route_index: Index (0-based) of the best route in route_inputs
+        user_prompt: Optional user prompt for scoring context
+    """
+    route_inputs: List[ScoringRouteInput]
+    best_route_index: int
+    example_id: Optional[str] = None
+    user_prompt: Optional[str] = None
+
+
+@dataclass
+class ScoringEvaluationResult:
+    """
+    Result of evaluating a single scoring ground truth example.
+    
+    Attributes:
+        example_id: Identifier for the example
+        app_chosen_index: Index of the route chosen by the app (0-based)
+        ground_truth_index: Index of the ground truth best route (0-based)
+        match: Whether app's choice matches ground truth
+        scored_routes: List of scored routes (sorted by score, best first)
+        processing_time_seconds: Time taken to process this example
+        error: Optional error message if evaluation failed
+    """
+    example_id: Optional[str]
+    app_chosen_index: Optional[int] = None
+    ground_truth_index: int = 0
+    match: bool = False
+    scored_routes: List[RouteScore] = None
+    processing_time_seconds: float = 0.0
+    error: Optional[str] = None
+
+    def __post_init__(self):
+        """Initialize empty lists if None."""
+        if self.scored_routes is None:
+            self.scored_routes = []
 
 
 class RouteEvaluator:
@@ -646,5 +710,171 @@ class RouteEvaluator:
             total_time,
         )
 
+        return results
+
+    def evaluate_scoring_example(
+        self,
+        example: ScoringGroundTruthExample,
+        user_prompt: Optional[str] = None,
+    ) -> ScoringEvaluationResult:
+        """
+        Evaluate a single scoring ground truth example.
+        
+        This method:
+        1. Builds a route for each route input in the example
+        2. Scores all routes using the route scorer
+        3. Picks the best route (highest score)
+        4. Compares with the annotated best route index
+        
+        Args:
+            example: Scoring ground truth example to evaluate
+            user_prompt: Optional user prompt for scoring (uses example.user_prompt if not provided)
+            
+        Returns:
+            ScoringEvaluationResult with comparison metrics
+        """
+        start_time = time.time()
+        example_id = example.example_id or "unknown"
+        prompt = user_prompt or example.user_prompt or ""
+
+        try:
+            self.logger.info(
+                "Evaluating scoring example %s: %d route inputs, best route index: %d",
+                example_id,
+                len(example.route_inputs),
+                example.best_route_index,
+            )
+
+            # Step 1: Build routes for all route inputs
+            self.logger.info("Step 1: Building routes for all inputs")
+            routes: List[Route] = []
+            for i, route_input in enumerate(example.route_inputs):
+                self.logger.info(
+                    "  Building route %d/%d: %d waypoints",
+                    i + 1,
+                    len(example.route_inputs),
+                    len(route_input.waypoint_coords),
+                )
+                
+                # Convert waypoint coordinates to Waypoint objects
+                waypoints: List[Waypoint] = []
+                for j, coord in enumerate(route_input.waypoint_coords):
+                    waypoint = Waypoint(
+                        name=f"Waypoint {j+1}",
+                        coordinates=coord,
+                        category="waypoint",
+                        relevance_score=5.0,  # Default relevance score
+                        metadata={},
+                        input_query="",
+                    )
+                    waypoints.append(waypoint)
+                
+                # Build single route using all waypoints
+                route = self.route_builder.build_single_route(
+                    origin=route_input.origin,
+                    destination=route_input.destination,
+                    waypoints=waypoints,
+                    constraints=route_input.constraints,
+                    optimize_order=True,
+                )
+                routes.append(route)
+
+            # Step 2: Score all routes
+            self.logger.info("Step 2: Scoring all routes")
+            # Determine image limits based on ENABLE_SCORING
+            enable_scoring = os.getenv("ENABLE_SCORING", "false").lower() == "true"
+            min_images = 3 if enable_scoring else 0
+            max_images = 10 if enable_scoring else 0
+            
+            scored_routes = self.route_scorer.score_routes(
+                routes=routes,
+                user_prompt=prompt,
+                min_images_per_route=min_images,
+                max_images_per_route=max_images,
+            )
+
+            # Step 3: Pick the best route (highest overall score)
+            if not scored_routes:
+                raise RuntimeError("No routes were scored successfully")
+            
+            # Sort by overall score (descending) - best first
+            scored_routes_sorted = sorted(
+                scored_routes,
+                key=lambda sr: sr.overall_score,
+                reverse=True,
+            )
+            best_scored_route = scored_routes_sorted[0]
+            
+            # Find the index of the best route in the original routes list
+            app_chosen_index = routes.index(best_scored_route.route)
+            
+            # Step 4: Compare with ground truth
+            match = app_chosen_index == example.best_route_index
+            
+            self.logger.info(
+                "Scoring evaluation complete: app chose index %d, ground truth index %d, match: %s",
+                app_chosen_index,
+                example.best_route_index,
+                match,
+            )
+
+            processing_time = time.time() - start_time
+            
+            return ScoringEvaluationResult(
+                example_id=example_id,
+                app_chosen_index=app_chosen_index,
+                ground_truth_index=example.best_route_index,
+                match=match,
+                scored_routes=scored_routes_sorted,
+                processing_time_seconds=processing_time,
+            )
+
+        except Exception as e:
+            self.logger.error("Error evaluating scoring example %s: %s", example_id, str(e), exc_info=True)
+            processing_time = time.time() - start_time
+            return ScoringEvaluationResult(
+                example_id=example_id,
+                ground_truth_index=example.best_route_index,
+                processing_time_seconds=processing_time,
+                error=str(e),
+            )
+
+    def run_scoring_batch(
+        self,
+        examples: List[ScoringGroundTruthExample],
+    ) -> List[ScoringEvaluationResult]:
+        """
+        Run batch evaluation on scoring ground truth examples.
+        
+        Args:
+            examples: List of scoring ground truth examples
+            
+        Returns:
+            List of ScoringEvaluationResult objects
+        """
+        results: List[ScoringEvaluationResult] = []
+        total_time = time.time()
+        
+        for example in examples:
+            result = self.evaluate_scoring_example(example)
+            results.append(result)
+        
+        total_time = time.time() - total_time
+        
+        # Calculate accuracy
+        successful = [r for r in results if r.error is None]
+        matches = sum(1 for r in successful if r.match)
+        accuracy = matches / len(successful) if successful else 0.0
+        
+        self.logger.info(
+            "Scoring batch evaluation complete: %d/%d successful, %d/%d matches (accuracy: %.1f%%), total time: %.2fs",
+            len(successful),
+            len(examples),
+            matches,
+            len(successful),
+            accuracy * 100.0,
+            total_time,
+        )
+        
         return results
 
