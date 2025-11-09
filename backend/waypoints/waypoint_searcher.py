@@ -11,7 +11,9 @@ from typing import List, Dict, Any, Tuple, Iterable, Optional
 from dataclasses import dataclass
 import time
 import re
+import os
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from shapely.geometry import Point, Polygon
 
@@ -55,29 +57,45 @@ class WaypointSearcher:
         Search for waypoints within the search zone using Overpass.
         Assumes `waypoint_queries` are already well-formatted OSM tag filters
         (e.g., "amenity=school", '["tourism"="viewpoint"]', "landuse=forest").
+
+        This implementation uses bounded parallelism to run up to OVERPASS_MAX_WORKERS
+        queries at a time, with a small stagger (OVERPASS_DELAY_SEC) to be polite.
         """
         zone_poly = self._zone_polygon(search_zone)
         if zone_poly is None or zone_poly.is_empty:
             return []
 
+        max_workers = int(os.getenv("OVERPASS_MAX_WORKERS", "2"))
+        politeness_delay_s = float(os.getenv("OVERPASS_DELAY_SEC", "0.2"))
+
         all_waypoints: List[Waypoint] = []
 
-        for q in waypoint_queries:
-            # Build a single-query Overpass request for nodes/ways/relations within polygon
+        def _one(q: str) -> List[Waypoint]:
             elements = self._overpass_query_polygon(zone_poly, q)
-            # Spatial filter (belt & suspenders), then convert to Waypoints
             elements_in = self._filter_by_zone(elements, search_zone)
-            waypoints = self._convert_pois_to_waypoints(elements_in, q)
-            # Rank for this query (centrality removed; only tag+name similarity)
+            wps = self._convert_pois_to_waypoints(elements_in, q)
             ranked = self._rank_waypoints(
-                waypoints,
+                wps,
                 query=q,
                 origin=search_zone.origin_isochrone.center,
                 destination=search_zone.destination_isochrone.center,
             )
-            all_waypoints.extend(ranked)
-            # Be polite to Overpass (shared resource)
-            time.sleep(1.0)
+            return ranked
+
+        # Bounded fan-out with slight staggering to avoid burst load
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futs = {}
+            for i, q in enumerate(waypoint_queries):
+                if i > 0 and politeness_delay_s > 0:
+                    time.sleep(politeness_delay_s)
+                futs[pool.submit(_one, q)] = q
+
+            for fut in as_completed(futs):
+                try:
+                    all_waypoints.extend(fut.result())
+                except Exception:
+                    # ignore individual failures for resilience
+                    continue
 
         # De-dupe by (name, lat, lon) keeping highest score (query not included in dedupe key)
         dedup: Dict[Tuple[str, float, float], Waypoint] = {}

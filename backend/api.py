@@ -1,5 +1,6 @@
+###################### Switch between old and optimized orchestrator ################
 # backend/api.py
-################################# TAZRIAN'S UPDATES BELOW (Oct 12, 2025) ###############################################
+################################# TAZRIAN'S UPDATES (Oct 12, 2025) ###############################################
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,15 @@ import uvicorn
 import os
 import dataclasses
 
-from backend.orchestrator import RouteOrchestrator, RouteRequest
+# ---- Orchestrator mode switch (parallel vs sync) ----
+# Set ORCH_MODE=sync to use backend/orchestrator_sync.py (baseline, no thread fan-out)
+# Default is parallel (backend/orchestrator.py)
+_ORCH_MODE = os.getenv("ORCH_MODE", "parallel").lower()
+if _ORCH_MODE == "sync":
+    from backend.orchestrator_sync import RouteOrchestratorSync as RouteOrchestrator, RouteRequest
+else:
+    from backend.orchestrator import RouteOrchestrator, RouteRequest
+
 
 # ---------- Pydantic models for API (aligned with UI contract) ----------
 class PlaceInput(BaseModel):
@@ -23,9 +32,11 @@ class PlaceInput(BaseModel):
             raise ValueError("Provide either 'text' or both 'lat' and 'lon' for origin/destination.")
         return v
 
+
 class TimeInput(BaseModel):
     max_duration_min: Optional[int] = Field(default=None, ge=1, le=1440)
     departure_time_utc: Optional[str] = None  # ISO8601
+
 
 class RouteGenerationRequest(BaseModel):
     user_prompt: str = Field(..., description="Natural language description of desired route")
@@ -34,14 +45,17 @@ class RouteGenerationRequest(BaseModel):
     destination: Optional[PlaceInput] = None
     time: Optional[TimeInput] = None
 
+
 class RouteGenerationResponse(BaseModel):
     routes: List[Dict[str, Any]]
     processing_time_seconds: float
     metadata: Dict[str, Any]
 
+
 class HealthResponse(BaseModel):
     status: str
     modules: Dict[str, str]
+
 
 app = FastAPI(
     title="Free-form Text to Route API",
@@ -63,6 +77,7 @@ app.add_middleware(
 
 orchestrator: Optional[RouteOrchestrator] = None
 
+
 def get_orchestrator() -> RouteOrchestrator:
     global orchestrator
     if orchestrator is None:
@@ -78,9 +93,11 @@ def get_orchestrator() -> RouteOrchestrator:
         orchestrator = RouteOrchestrator(config)
     return orchestrator
 
+
 @app.get("/", response_model=Dict[str, str])
 async def root():
-    return {"message": "Free-form Text to Route API", "version": "1.0.0"}
+    return {"message": "Free-form Text to Route API", "version": "1.0.0", "mode": _ORCH_MODE}
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check(orch: RouteOrchestrator = Depends(get_orchestrator)):
@@ -89,9 +106,11 @@ async def health_check(orch: RouteOrchestrator = Depends(get_orchestrator)):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
+
 @app.get("/healthz", response_model=Dict[str, str])   # fast probe
 async def healthz():
     return {"status": "ok"}
+
 
 @app.post("/generate-routes", response_model=RouteGenerationResponse)
 async def generate_routes(
@@ -108,13 +127,12 @@ async def generate_routes(
         )
         resp = orch.generate_routes(internal)
 
-        # Normalize orchestrator output (dict OR dataclass) to a dict:
+        # Normalize orchestrator output (dataclass OR dict) to a dict:
         if dataclasses.is_dataclass(resp):
             resp = dataclasses.asdict(resp)
         elif not isinstance(resp, dict):
             raise TypeError(f"Unexpected orchestrator return type: {type(resp)}")
 
-        # Validate/shape via Pydantic model
         return RouteGenerationResponse(
             routes=resp.get("routes", []),
             processing_time_seconds=float(resp.get("processing_time_seconds", 0.0)),
@@ -122,6 +140,7 @@ async def generate_routes(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Route generation failed: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run("backend.api:app", host="0.0.0.0", port=8000, reload=True)

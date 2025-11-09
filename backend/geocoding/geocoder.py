@@ -20,6 +20,9 @@ USER_AGENT = "berkeley-detourist/1.0 (berkeley.edu)"
 #   MB_ISO_MAX_MIN=60 (recommended)
 ISO_MAX_MINUTES = int(os.getenv("MB_ISO_MAX_MIN", "60"))
 
+# If the API/orchestrator doesn’t pass transport_mode, we enforce driving here too.
+FORCE_TRANSPORT_MODE = os.getenv("FORCE_TRANSPORT_MODE", "").strip().lower()
+
 @dataclass
 class Coordinates:
     latitude: float
@@ -74,15 +77,16 @@ class Geocoder:
 
     # ---------------- Routing (Mapbox Directions) ----------------
     def _mb_profile(self, transport_mode: str) -> str:
-        # Mapbox profiles: driving | walking | cycling
+        # Force if configured
+        mode = (FORCE_TRANSPORT_MODE or transport_mode or "").lower().strip()
         return {
             "walking": "walking",
             "driving": "driving",
             "cycling": "cycling",
-        }.get(transport_mode, "walking")
+        }.get(mode, "driving")  # <— default DRIVING
 
     def shortest_travel_time_minutes(
-        self, origin: Coordinates, destination: Coordinates, transport_mode: str = "walking"
+        self, origin: Coordinates, destination: Coordinates, transport_mode: str = "driving"
     ) -> int:
         """
         Shortest travel time (minutes) using Mapbox Directions.
@@ -109,7 +113,6 @@ class Geocoder:
     @staticmethod
     def _cap_minutes(minutes: int) -> int:
         if minutes > ISO_MAX_MINUTES:
-            # visible log to spot when clamping happens
             print(f"[Isochrone] requested {minutes} min > cap {ISO_MAX_MINUTES}; clamping.")
             return ISO_MAX_MINUTES
         if minutes < 0:
@@ -117,7 +120,7 @@ class Geocoder:
         return minutes
 
     def create_isochrone(
-        self, center: Coordinates, travel_time_minutes: int, transport_mode: str = "walking"
+        self, center: Coordinates, travel_time_minutes: int, transport_mode: str = "driving"
     ) -> Isochrone:
         """
         Exterior ring (largest shell) of a Mapbox Isochrone for a single contour in minutes.
@@ -163,13 +166,11 @@ class Geocoder:
         origin: Coordinates,
         destination: Coordinates,
         max_additional_time: int,
-        transport_mode: str = "walking",
+        transport_mode: str = "driving",
     ) -> SearchZone:
         """
         Build the search zone as the UNION of intersections from isochrone-size pairs
         that sum to: shortest_travel_time + max_additional_time.
-        We step in 5-minute increments (or up to 20 even-spaced points if base>60).
-        Each *individual* isochrone call is still capped by _cap_minutes().
         """
         base = self.shortest_travel_time_minutes(origin, destination, transport_mode)
         max_travel_time = base + int(max_additional_time)

@@ -21,7 +21,6 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
-          # Run 2 workers so one can answer /healthz while the other does heavy work
           args:
             - uvicorn
             - backend.api:app
@@ -29,41 +28,52 @@ spec:
             - 0.0.0.0
             - --port
             - "8000"
+            # IMPORTANT: single worker so CLIP loads once
             - --workers
-            - "2"
+            - "1"
+            # keep long requests alive
+            - --timeout-keep-alive
+            - "240"
+          env:
+            # keep torch from spawning too many threads
+            - name: OMP_NUM_THREADS
+              value: "2"
+            - name: MKL_NUM_THREADS
+              value: "2"
+            - name: TOKENIZERS_PARALLELISM
+              value: "false"
           envFrom:
             - configMapRef:
                 name: har-backend-config
             - secretRef:
                 name: har-backend-secrets
-          # --- Probes tuned for cold start + heavy work ---
           startupProbe:
             httpGet:
               path: /healthz
               port: 8000
             periodSeconds: 5
-            failureThreshold: 30      # 30 * 5s = 150s
-            timeoutSeconds: 2
+            failureThreshold: 36      # 3 min window for first CLIP load
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 6
+            initialDelaySeconds: 10
+            periodSeconds: 6
+            timeoutSeconds: 4
+            failureThreshold: 8
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8000
-            initialDelaySeconds: 90
+            initialDelaySeconds: 180   # allow heavy scoring before liveness kicks in
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "1500m"
+              memory: "1536Mi"
             limits:
               cpu: "2000m"
-              memory: "6Gi"
+              memory: "4Gi"
