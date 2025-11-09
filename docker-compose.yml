@@ -4,17 +4,21 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - LLM_API_KEY=${LLM_API_KEY}
-      - GEOCODING_API_KEY=${GEOCODING_API_KEY}
-      - POI_API_KEY=${POI_API_KEY}
+      # Required API keys
       - ROUTING_API_KEY=${ROUTING_API_KEY}
-      - CLIP_MODEL_PATH=/app/models/clip_model.pth
-      - OPENAI_COMPATIBLE_URL=${OPENAI_COMPATIBLE_URL:-http://ollama:11434/v1/chat/completions}
-      - OPENAI_COMPATIBLE_API_KEY=${OPENAI_COMPATIBLE_API_KEY:-dummy-key}
+      - GEOCODING_API_KEY=${GEOCODING_API_KEY}
+      # Optional API keys
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - MAPILLARY_TOKEN=${MAPILLARY_TOKEN:-}
+      # Optional configuration (has defaults in code)
+      - CLIP_MODEL_NAME=${CLIP_MODEL_NAME:-openai/clip-vit-base-patch32}
+      - ENABLE_SCORING=${ENABLE_SCORING:-false}
+      # Redis (has default in code: redis://localhost:6379/0)
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - ./models:/app/models
       - ./logs:/app/logs
