@@ -45,7 +45,12 @@ export async function getDirections(
           legs: route.legs,
         };
 
-        console.log('Google Directions API Response:', routeData);
+        console.log('Google Directions API Response received:', {
+          origin: leg.start_address,
+          destination: leg.end_address,
+          duration: leg.duration?.text,
+          distance: leg.distance?.text
+        });
         resolve(routeData);
       } else {
         reject(new Error(`Directions request failed: ${status}`));
@@ -65,16 +70,36 @@ export async function convertBackendRouteToDirections(
   return new Promise((resolve, reject) => {
     const directionsService = new google.maps.DirectionsService();
     
+    // Handle both old format (coordinates.origin) and new format (origin.latitude)
+    const originLat = backendRoute.coordinates?.origin?.lat ?? backendRoute.origin?.latitude;
+    const originLng = backendRoute.coordinates?.origin?.lng ?? backendRoute.origin?.longitude;
+    const destLat = backendRoute.coordinates?.destination?.lat ?? backendRoute.destination?.latitude;
+    const destLng = backendRoute.coordinates?.destination?.lng ?? backendRoute.destination?.longitude;
+    
+    if (!originLat || !originLng || !destLat || !destLng) {
+      console.error('Invalid backend route format:', backendRoute);
+      reject(new Error('Invalid backend route: missing origin or destination coordinates'));
+      return;
+    }
+    
+    // Extract waypoints from either format
+    let waypoints: any[] = [];
+    if (backendRoute.coordinates?.waypoints) {
+      // Old format: coordinates.waypoints with lat/lng
+      waypoints = backendRoute.coordinates.waypoints;
+    } else if (backendRoute.waypoints) {
+      // New format: waypoints with coordinates.latitude/longitude
+      waypoints = backendRoute.waypoints.map((wp: any) => ({
+        lat: wp.coordinates.latitude,
+        lng: wp.coordinates.longitude,
+        name: wp.name
+      }));
+    }
+    
     const request: google.maps.DirectionsRequest = {
-      origin: new google.maps.LatLng(
-        backendRoute.coordinates.origin.lat,
-        backendRoute.coordinates.origin.lng
-      ),
-      destination: new google.maps.LatLng(
-        backendRoute.coordinates.destination.lat,
-        backendRoute.coordinates.destination.lng
-      ),
-      waypoints: backendRoute.coordinates.waypoints.map((wp: any) => ({
+      origin: new google.maps.LatLng(originLat, originLng),
+      destination: new google.maps.LatLng(destLat, destLng),
+      waypoints: waypoints.map((wp: any) => ({
         location: new google.maps.LatLng(wp.lat, wp.lng),
         stopover: true
       })),
@@ -83,10 +108,19 @@ export async function convertBackendRouteToDirections(
       provideRouteAlternatives: false,
     };
 
+    // Log simplified request info (avoid circular refs from Google Maps objects)
+    console.log('Converting backend route to directions:', {
+      origin: `${originLat}, ${originLng}`,
+      destination: `${destLat}, ${destLng}`,
+      waypointCount: waypoints.length
+    });
+
     directionsService.route(request, (result, status) => {
       if (status === google.maps.DirectionsStatus.OK && result) {
+        console.log('Backend route converted successfully');
         resolve(result);
       } else {
+        console.error(`Directions request failed: ${status}`);
         reject(new Error(`Directions request failed: ${status}`));
       }
     });
@@ -116,9 +150,13 @@ export async function getRouteAlternatives(
 
     directionsService.route(request, (result, status) => {
       if (status === google.maps.DirectionsStatus.OK && result) {
-        console.log('Google Directions API Response (alternatives):', result);
+        console.log('Google Directions API Response (alternatives):', {
+          routeCount: result.routes?.length || 0,
+          status: status
+        });
         resolve(result);
       } else {
+        console.error(`Directions request failed: ${status}`);
         reject(new Error(`Directions request failed: ${status}`));
       }
     });

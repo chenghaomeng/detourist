@@ -78,6 +78,7 @@ class RouteBuilder:
               * 5 multi-waypoint routes via top K waypoints (K = 2..6), with
                 the waypoint order optimized via Mapbox Optimized Trips.
           - Per route, call Mapbox Directions for each adjacent pair to build segments.
+          - If no waypoints provided, return a direct route as fallback
 
         Args:
             origin: Starting point coordinates
@@ -93,7 +94,9 @@ class RouteBuilder:
         """
         routes: List[Route] = []
         if not waypoints:
-            return routes
+            # Fallback: build a direct route with no waypoints
+            direct_route = self._build_multi_route(origin, destination, [], constraints)
+            return [direct_route]
 
         # Sort by relevance_score desc (higher is better)
         ordered = sorted(waypoints, key=lambda w: w.relevance_score, reverse=True)

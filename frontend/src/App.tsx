@@ -8,7 +8,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState(""); // Only updates on submit
   const [isNaturalSearch, setIsNaturalSearch] = useState(true);
-  const [isEnhancedMode, setIsEnhancedMode] = useState(false);
+  const [isEnhancedMode, setIsEnhancedMode] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [directionsResult, setDirectionsResult] = useState<google.maps.DirectionsResult | null>(null);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);

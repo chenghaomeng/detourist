@@ -1,17 +1,16 @@
 """
-Simplified LLM Provider implementations with extensible architecture.
+LLM providers with Ollama (Llama 3.1) support.
 
-This module provides a unified interface for LLM providers:
-1. Llama 3.1 8b q4_K_M - Local Ollama (no API key required)
-2. Extensible for future providers (OpenAI, Anthropic, etc.) that require API keys
-
-The LLMProviderManager handles fallback between providers automatically.
+Environment variables used:
+  - LLM_PROVIDER=ollama            # default
+  - OLLAMA_BASE_URL=http://detourist-ollama:11434  # or http://localhost:11434
+  - OLLAMA_MODEL=llama3.1:8b-instruct-q4_K_M
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Optional, List
 import requests
-import json
 import re
 import logging
 import os
@@ -19,53 +18,78 @@ import os
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
-    
+
     def __init__(self, model_name: str):
         self.model_name = model_name
         self.logger = logging.getLogger(__name__)
-    
-    @abstractmethod
-    def extract_parameters(self, prompt: str) -> str:
-        """Extract parameters using the LLM provider."""
-        pass
-    
+
     @abstractmethod
     def is_available(self) -> bool:
-        """Check if the provider is available."""
-        pass
+        """Return True if the provider can serve requests."""
+        ...
+
+    @abstractmethod
+    def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
+        """Run the model and return either raw text or a JSON string."""
+        ...
 
 
 class LlamaProvider(LLMProvider):
-    """Llama 3.1 provider using Ollama (no API key required)."""
-    
+    """
+    Llama 3.1 provider via Ollama.
+
+    Base URL resolution order:
+      1) OLLAMA_BASE_URL env
+      2) http://localhost:11434
+      3) http://host.docker.internal:11434
+    """
+
     def __init__(self, model_name: str = "llama3.1:8b-instruct-q4_K_M"):
         super().__init__(model_name)
-        self.ollama_url = "http://ollama:11434/api/generate"  # Docker service name
-        self.fallback_urls = [
-            "http://localhost:11434/api/generate",  # Local development
-            "http://host.docker.internal:11434/api/generate",  # Docker Desktop
+        base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
+        self._candidates: List[str] = []
+        if base:
+            self._candidates.append(base)
+        self._candidates += [
+            "http://localhost:11434",
+            "http://host.docker.internal:11434",
         ]
-    
+        self._generate_url: Optional[str] = None
+        self._tags_url: Optional[str] = None
+
+    # ---------- internal ----------
+
+    def _set_urls(self, base: str) -> None:
+        base = base.rstrip("/")
+        self._generate_url = f"{base}/api/generate"
+        self._tags_url = f"{base}/api/tags"
+
+    # ---------- public ------------
+
     def is_available(self) -> bool:
-        """Check if Ollama is running and model is available."""
-        for url in [self.ollama_url] + self.fallback_urls:
+        for base in self._candidates:
             try:
-                # Check if Ollama is running
-                response = requests.get(f"{url.replace('/api/generate', '/api/tags')}", timeout=10)
-                if response.status_code == 200:
-                    # Check if our model is available
-                    models = response.json().get("models", [])
-                    model_names = [model.get("name", "") for model in models]
-                    if self.model_name in model_names:
-                        self.ollama_url = url
-                        return True  # Model is available, don't test generation
+                self._set_urls(base)
+                r = requests.get(self._tags_url, timeout=6)
+                if r.status_code != 200:
+                    self.logger.warning(f"[LLM] /api/tags non-200 at {base}: {r.status_code}")
+                    continue
+                data = r.json() if r.content else {"models": []}
+                models = [m.get("name", "") for m in data.get("models", [])]
+                if self.model_name in models:
+                    self.logger.info(f"[LLM] Ollama OK at {base} w/ model {self.model_name}")
+                    return True
+                else:
+                    self.logger.warning(f"[LLM] Model {self.model_name} not listed at {base}. Found: {models}")
             except Exception as e:
-                self.logger.debug(f"Ollama check failed for {url}: {str(e)}")
-                continue
+                self.logger.warning(f"[LLM] probe failed at {base}: {e}")
         return False
-    
+
     def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
-        """Extract parameters using Llama 3.1."""
+        if not self._generate_url:
+            if not self.is_available():
+                raise Exception("Ollama not available or model missing")
+
         payload = {
             "model": self.model_name,
             "prompt": prompt,
@@ -73,113 +97,72 @@ class LlamaProvider(LLMProvider):
             "options": {
                 "temperature": 0.1,
                 "top_p": 0.9,
-                "num_predict": 500,  # Reduced from 1000
-            }
+                "num_predict": 700,
+            },
         }
-        
         try:
-            self.logger.info(f"Making request to Ollama with model {self.model_name}")
-            response = requests.post(
-                self.ollama_url,
-                json=payload,
-                timeout=300  # 5 minutes timeout
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            response_text = result.get("response", "")
-            self.logger.info(f"Successfully received response from Ollama (length: {len(response_text)})")
-            
-            # Only extract JSON if we expect JSON (for full parameter extraction)
-            if expect_json:
-                cleaned_response = self._extract_json_from_response(response_text)
-            else:
-                # For preference extraction, just return the cleaned text
-                cleaned_response = response_text.strip()
-            
-            return cleaned_response
-            
+            self.logger.info(f"[LLM] POST {self._generate_url} (model={self.model_name})")
+            resp = requests.post(self._generate_url, json=payload, timeout=300)
+            resp.raise_for_status()
+            result = resp.json()
+            text = (result or {}).get("response", "")
+            self.logger.info(f"[LLM] rx chars={len(text)}")
+
+            if not expect_json:
+                return text.strip()
+
+            # Try codefence JSON first, then greedy
+            js = self._extract_json(text)
+            if js is not None:
+                return js
+            # If the model already returned naked JSON:
+            t = text.strip()
+            if t.startswith("{") and t.endswith("}"):
+                return t
+            raise Exception("No JSON object found in LLM response")
         except requests.exceptions.Timeout:
-            self.logger.error(f"Ollama request timed out after 300 seconds. Model may still be loading.")
-            raise Exception("Ollama request timed out - model may still be loading into memory")
-        except requests.exceptions.ConnectionError:
-            self.logger.error(f"Failed to connect to Ollama at {self.ollama_url}")
-            raise Exception("Cannot connect to Ollama service")
+            raise Exception("Ollama request timed out (model may still be loading)")
+        except requests.exceptions.ConnectionError as e:
+            raise Exception(f"Cannot connect to Ollama at {self._generate_url}: {e}")
         except Exception as e:
-            self.logger.error(f"Ollama request failed: {str(e)}")
+            self.logger.exception(f"[LLM] call failed: {e}")
             raise
-    
-    def _extract_json_from_response(self, response_text: str) -> str:
-        """Extract JSON from LLM response, handling markdown formatting."""
-        
-        # Try to find JSON in markdown code blocks first
-        json_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
-        match = re.search(json_pattern, response_text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        
-        # Try to find JSON without markdown - use greedy matching to get complete JSON
-        json_pattern = r'(\{.*\})'
-        match = re.search(json_pattern, response_text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        
-        # If no JSON found, return the original response
-        self.logger.warning("No JSON found in LLM response, returning original text")
-        return response_text
+
+    # ---------- helpers ----------
+
+    def _extract_json(self, text: str) -> Optional[str]:
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"(\{.*\})", text, flags=re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        return None
 
 
 class LLMProviderManager:
-    """Manager for LLM providers with fallback support."""
-    
+    """Manager that selects a provider and offers a single `extract_parameters` API."""
+
     def __init__(self, api_key: str = ""):
         self.logger = logging.getLogger(__name__)
-        self.api_key = api_key  # For future LLM providers that need API keys
-        
-        # Use q4_K_M quantized Llama 3.1 8b for optimal balance of speed and accuracy
-        self.providers = [
-            LlamaProvider("llama3.1:8b-instruct-q4_K_M"),
-            # Future providers that need API keys can be added here:
-            # OpenAIProvider(self.api_key) if self.api_key else None,
-            # AnthropicProvider(self.api_key) if self.api_key else None,
-        ]
-        # Filter out None providers
-        self.providers = [p for p in self.providers if p is not None]
-    
+        choice = os.getenv("LLM_PROVIDER", "ollama").lower()
+        model = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+        providers: List[LLMProvider] = []
+        if choice in ("ollama", "auto"):
+            providers.append(LlamaProvider(model))
+        self.providers = providers
+
     def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
-        """
-        Extract parameters using available LLM providers with fallback.
-        
-        Args:
-            prompt: The extraction prompt
-            expect_json: Whether to expect JSON response (True) or plain text (False)
-            
-        Returns:
-            Extracted parameters as string (JSON or plain text)
-            
-        Raises:
-            Exception: If all providers fail
-        """
-        for provider in self.providers:
+        last_err: Optional[str] = None
+        for p in self.providers:
             try:
-                if provider.is_available():
-                    self.logger.info(f"Trying provider: {provider.__class__.__name__} ({provider.model_name})")
-                    result = provider.extract_parameters(prompt, expect_json)
-                    self.logger.info(f"Successfully extracted parameters using {provider.__class__.__name__}")
-                    return result
+                if p.is_available():
+                    self.logger.info(f"[LLM] using {p.__class__.__name__} ({p.model_name})")
+                    return p.extract_parameters(prompt, expect_json=expect_json)
                 else:
-                    self.logger.warning(f"Provider {provider.__class__.__name__} ({provider.model_name}) is not available")
+                    self.logger.warning(f"[LLM] provider {p.__class__.__name__} not available")
             except Exception as e:
-                self.logger.error(f"Provider {provider.__class__.__name__} failed: {str(e)}")
+                last_err = str(e)
+                self.logger.error(f"[LLM] provider {p.__class__.__name__} failed: {last_err}")
                 continue
-        
-        # All providers failed
-        raise Exception("All LLM providers failed")
-    
-    def get_available_providers(self) -> list:
-        """Get list of available providers."""
-        available = []
-        for provider in self.providers:
-            if provider.is_available():
-                available.append(f"{provider.__class__.__name__} ({provider.model_name})")
-        return available
+        raise Exception(f"All LLM providers failed{(': ' + last_err) if last_err else ''}")

@@ -256,10 +256,25 @@ export function NaturalSearchFlow({
             setProcessingText("Analyzing with AI (this may take 10-30 seconds)...");
             setIsLoadingEnhanced(true);
             
+            console.log('Calling backend API with query:', searchQuery);
             const backendResponse = await generateRoutesFromBackend({
               user_prompt: searchQuery,
               max_results: 3
             });
+            
+            console.log('Backend response received:', {
+              routeCount: backendResponse.routes?.length || 0,
+              hasMetadata: !!backendResponse.metadata,
+              processingTime: backendResponse.processing_time_seconds
+            });
+            
+            if (!backendResponse.routes || backendResponse.routes.length === 0) {
+              const waypointsFound = backendResponse.metadata?.waypoints_found || 0;
+              if (waypointsFound === 0) {
+                throw new Error('No scenic waypoints found. Try adding preferences like "scenic", "parks", "quiet", or "coastal" to your search.');
+              }
+              throw new Error('Backend returned no routes. Try a different query.');
+            }
             
             setBackendRoutes(backendResponse.routes);
             
@@ -268,16 +283,39 @@ export function NaturalSearchFlow({
               try {
                 const directionsResult = await convertBackendRouteToDirections(backendResponse.routes[0]);
                 setDirectionsData(directionsResult);
+                onDirectionsResult(directionsResult);
               } catch (error) {
                 console.error("Failed to convert backend route to directions:", error);
               }
             }
             
-            // Extract origin/dest from backend response if available
-            if (backendResponse.routes[0]) {
-              // Try to parse from metadata or use generic names
-              setStartLocation("Origin");
-              setDestination("Destination");
+            // Extract origin/dest from backend metadata
+            console.log('Backend metadata:', {
+              origin_text: backendResponse.metadata?.origin_text,
+              destination_text: backendResponse.metadata?.destination_text
+            });
+            
+            if (backendResponse.metadata?.origin_text && backendResponse.metadata?.destination_text) {
+              console.log('Using metadata text for locations');
+              setStartLocation(backendResponse.metadata.origin_text);
+              setDestination(backendResponse.metadata.destination_text);
+            } else if (backendResponse.routes && backendResponse.routes[0]) {
+              // Try to extract location names from the original query
+              console.log('Metadata text not available, trying to extract from query');
+              const query = searchQuery.toLowerCase();
+              
+              // Try to parse "from X to Y" pattern
+              const fromMatch = query.match(/from\s+([^to]+?)(?:\s+to\s+|\s+san\s+francisco)/i);
+              const toMatch = query.match(/to\s+([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+san\s+francisco|$)/i);
+              
+              if (fromMatch && toMatch) {
+                setStartLocation(fromMatch[1].trim());
+                setDestination(toMatch[1].trim());
+              } else {
+                // Final fallback: use "Origin" and "Destination" instead of coordinates
+                setStartLocation('Origin');
+                setDestination('Destination');
+              }
             }
             
             setProcessingText(
@@ -359,16 +397,15 @@ export function NaturalSearchFlow({
   };
 
   const handleRouteSelect = async (routeId: string) => {
-    const routeIndex = parseInt(routeId);
+    // routeId is 1-indexed from backend, convert to 0-indexed for array access
+    const arrayIndex = parseInt(routeId) - 1;
     setSelectedRoute(routeId);
-    setSelectedRouteIndex(routeIndex);
-    onRouteIndexChange(routeIndex);
+    setSelectedRouteIndex(arrayIndex);
+    onRouteIndexChange(arrayIndex);
     setCurrentStep("detail");
     
     // Convert selected backend route to Google Maps directions for map display
     if (isEnhancedMode && backendRoutes.length > 0) {
-      // Backend uses 1-indexed IDs, but we need 0-indexed array access
-      const arrayIndex = routeIndex - 1;
       if (backendRoutes[arrayIndex]) {
         try {
           const directionsResult = await convertBackendRouteToDirections(backendRoutes[arrayIndex]);
@@ -425,102 +462,75 @@ export function NaturalSearchFlow({
 
   // Convert backend routes to UI format
   const convertBackendRoutesToUI = (): RouteOption[] => {
-    if (!backendRoutes.length) return [];
+    if (!backendRoutes || !backendRoutes.length) return [];
     
     // Calculate shortest route distance for detour calculation
-    const shortestDistance = Math.min(...backendRoutes.map(r => r.distance_m));
+    const shortestDistance = Math.min(...backendRoutes.map(r => r.distance_m || 0));
     
     return backendRoutes.map((route, index) => {
       // Calculate detour percentage
       const detourPct = ((route.distance_m - shortestDistance) / shortestDistance * 100).toFixed(0);
       const detourText = detourPct === "0" ? "0%" : `+${detourPct}%`;
       
-      // Parse waypoint names from coordinates
-      const waypointNames = route.coordinates.waypoints.map(wp => wp.name);
+      // Parse waypoint names from backend (with safety check)
+      const waypointNames = (route.waypoints || []).map(wp => wp.name);
       
-      // Convert OSM tags to user-friendly labels
-      const friendlyFeatures = route.features.map(tag => {
+      // Convert OSM tags to user-friendly labels (with safety check)
+      const friendlyFeatures = (route.features || []).map(tag => {
         const [key, value] = tag.split('=');
         switch(key) {
           case 'leisure': return value === 'park' ? 'Parks' : value;
           case 'tourism': return value === 'attraction' ? 'Attractions' : value;
           case 'amenity': return value === 'cafe' ? 'Cafes' : value;
           case 'natural': return 'Natural areas';
-          default: return `${key}=${value}`;
+          default: return tag; // Use the tag as-is if not recognized
         }
       });
       
-      // Create descriptive title based on waypoint names
+      // Create descriptive title based on route characteristics
       const createRouteTitle = () => {
         if (waypointNames.length === 0) {
-          return index === 0 ? "Direct Path" : `Alternative ${index}`;
+          return index === 0 ? "Direct Route" : `Alternative ${index + 1}`;
         }
         
-        // Use the first waypoint name, but make it more user-friendly
-        const firstWaypoint = waypointNames[0];
-        
-        // If it's a user-friendly name (doesn't contain OSM tags), use it directly
-        if (!firstWaypoint.includes('=') && !firstWaypoint.includes('way ') && !firstWaypoint.includes('node ')) {
-          const shortName = firstWaypoint.length > 30 ? firstWaypoint.substring(0, 30) + "..." : firstWaypoint;
-          return shortName;
-        }
-        
-        // Create descriptive titles based on waypoint type and context
-        if (firstWaypoint.includes('leisure=park')) {
-          return index === 0 ? "Park Stroll" : `Park Walk ${index}`;
-        } else if (firstWaypoint.includes('tourism=attraction')) {
-          return index === 0 ? "Attraction Tour" : `Attraction Route ${index}`;
-        } else if (firstWaypoint.includes('amenity=cafe')) {
-          return index === 0 ? "Cafe Route" : `Cafe Stop ${index}`;
-        } else if (firstWaypoint.includes('tourism=viewpoint')) {
-          return index === 0 ? "Scenic Viewpoint" : `Viewpoint Route ${index}`;
-        } else if (firstWaypoint.includes('way ') || firstWaypoint.includes('node ')) {
-          return index === 0 ? "Scenic Path" : `Scenic Route ${index}`;
+        // Use a more intelligent naming based on score and waypoints
+        if (index === 0) {
+          return "Most Scenic";
+        } else if (index === 1) {
+          return "Balanced Route";
         } else {
-          // Try to extract meaningful parts from OSM tags
-          const parts = firstWaypoint.split('=');
-          if (parts.length === 2) {
-            const category = parts[0];
-            const value = parts[1];
-            
-            if (category === 'leisure') {
-              return index === 0 ? `${value.charAt(0).toUpperCase() + value.slice(1)} Walk` : `${value.charAt(0).toUpperCase() + value.slice(1)} Route ${index}`;
-            } else if (category === 'tourism') {
-              return index === 0 ? `${value.charAt(0).toUpperCase() + value.slice(1)} Tour` : `${value.charAt(0).toUpperCase() + value.slice(1)} Route ${index}`;
-            } else if (category === 'amenity') {
-              return index === 0 ? `${value.charAt(0).toUpperCase() + value.slice(1)} Route` : `${value.charAt(0).toUpperCase() + value.slice(1)} Stop ${index}`;
-            }
-          }
-          
-          // Final fallback
-          return index === 0 ? "Scenic Route" : `Alternative ${index}`;
+          return `Alternative ${index + 1}`;
         }
       };
       
       return {
-        id: route.id,
+        id: route.id || String(index + 1),
         title: createRouteTitle(),
-        score: route.score,
-        duration: `${Math.round(route.duration_s / 60)} min`,
-        distance: `${(route.distance_m / 1609).toFixed(1)} mi`,
+        score: route.score || 0,
+        duration: `${Math.round((route.duration_s || 0) / 60)} min`,
+        distance: `${((route.distance_m || 0) / 1609).toFixed(1)} mi`,
         detour: detourText,
         tags: friendlyFeatures,
         description: route.why || "AI-generated scenic route",
         waypoints: waypointNames,
-        mapLinks: route.links,
-        // Use actual backend scoring data if available, otherwise estimate
+        mapLinks: route.links || {},
+        // Use actual backend scoring data (with safety checks)
         scoreBreakdown: {
-          scenic: Math.min(route.score / 10, 1.0),  // Normalize to 0-1 scale
-          safety: Math.min(route.score / 12, 1.0),
-          duration: Math.min(route.score / 15, 1.0),
-          quiet: Math.min(route.score / 8, 1.0),
+          scenic: Math.min(route.scores?.clip || 0, 1.0),
+          safety: Math.min(route.scores?.preference || 0, 1.0),
+          duration: Math.min(route.scores?.efficiency || 0, 1.0),
+          quiet: Math.min((route.scores?.clip || 0) * 0.8, 1.0),
         },
         // Add backend-specific data
         backendData: {
-          rawScore: route.score,
-          waypointCount: route.coordinates.waypoints.length,
-          features: route.features,
-          coordinates: route.coordinates
+          rawScore: route.score || 0,
+          waypointCount: (route.waypoints || []).length,
+          features: route.features || [],
+          coordinates: route.coordinates || {
+            origin: { lat: 0, lng: 0 },
+            destination: { lat: 0, lng: 0 },
+            waypoints: []
+          }
         }
       };
     });
@@ -528,11 +538,19 @@ export function NaturalSearchFlow({
 
   // Convert Google Directions routes to RouteOption format
   const convertDirectionsToRoutes = (): RouteOption[] => {
+    console.log('convertDirectionsToRoutes called:', {
+      isEnhancedMode,
+      backendRoutesCount: backendRoutes?.length || 0,
+      hasDirectionsData: !!directionsData
+    });
+    
     // Use backend routes if in enhanced mode
     if (isEnhancedMode && backendRoutes.length > 0) {
+      console.log('Using backend routes:', backendRoutes.length);
       return convertBackendRoutesToUI();
     }
     
+    console.log('Falling back to mock/directions data');
     if (!directionsData?.routes) return routeOptions; // Fallback to mock data
 
     return directionsData.routes.map((route, index) => {
@@ -580,11 +598,14 @@ export function NaturalSearchFlow({
         </div>
 
         <div className="text-xs text-gray-500 space-y-1">
-          <p>
-            Try: "Avoid highways, prefer tree-lined streets"
+          <p className="font-medium text-orange-600">
+            💡 Tip: Include preferences like "scenic", "parks", "quiet", "coastal" for better results
           </p>
-          <p>Try: "Calm route with mountain views"</p>
-          <p>Try: "Shortest path through downtown"</p>
+          <p>
+            Try: "Scenic route with parks from union square to chinatown"
+          </p>
+          <p>Try: "Quiet route avoiding highways to golden gate bridge"</p>
+          <p>Try: "Coastal drive with ocean views to marin"</p>
         </div>
 
         <Button
@@ -812,7 +833,7 @@ export function NaturalSearchFlow({
             key={route.id}
             onClick={() => handleRouteSelect(route.id)}
             className={`bg-white border rounded-lg p-4 transition-shadow cursor-pointer ${
-              selectedRouteIndex === parseInt(route.id)
+              selectedRoute === route.id
                 ? 'border-blue-500 border-2 shadow-lg'
                 : 'border-gray-200 hover:shadow-md'
             }`}
@@ -864,7 +885,7 @@ export function NaturalSearchFlow({
 
             {/* Features/Tags as Material 3 chips */}
             <div className="flex flex-wrap gap-1.5">
-              {route.tags.map((tag, index) => (
+              {(route.tags || []).map((tag, index) => (
                 <span
                   key={index}
                   className="inline-block bg-blue-50 text-blue-700 rounded px-2 py-0.5 text-xs font-medium"
@@ -962,8 +983,8 @@ export function NaturalSearchFlow({
               Why this route?
             </h3>
             <p className="text-sm text-gray-600">
-              {route.backendData ? 
-                `This route takes you through ${route.backendData.waypointCount} scenic stop${route.backendData.waypointCount !== 1 ? 's' : ''} including ${route.backendData.features.map(f => f.includes('leisure=park') ? 'parks' : f.includes('tourism=attraction') ? 'attractions' : f).join(', ')}.` :
+              {route.backendData && route.backendData.waypointCount > 0 ? 
+                `This route takes you through ${route.backendData.waypointCount} scenic stop${route.backendData.waypointCount !== 1 ? 's' : ''} including ${(route.backendData.features || []).map(f => f.includes('leisure=park') ? 'parks' : f.includes('tourism=attraction') ? 'attractions' : f).join(', ')}.` :
                 route.description?.replace('Route via ', 'This route passes through ').replace('leisure=park', 'parks').replace('way ', 'park area ') || 'AI-generated scenic route'
               }
             </p>
@@ -1027,7 +1048,7 @@ export function NaturalSearchFlow({
                             <div className="text-xs text-gray-500">
                               {waypoint}
                             </div>
-                            {route.backendData && route.backendData.coordinates.waypoints[index] && (
+                            {route.backendData && route.backendData.coordinates?.waypoints?.[index] && (
                               <div className="text-xs text-gray-400">
                                 📍 {route.backendData.coordinates.waypoints[index].lat.toFixed(4)}, {route.backendData.coordinates.waypoints[index].lng.toFixed(4)}
                               </div>
@@ -1076,7 +1097,7 @@ export function NaturalSearchFlow({
           )}
 
           {/* AI Score - Single display at bottom */}
-          {route.backendData && (
+          {route.backendData && route.backendData.rawScore !== undefined && (
             <div className="p-4 bg-green-50 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
                 <Star className="w-5 h-5 text-green-600" />

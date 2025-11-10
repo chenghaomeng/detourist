@@ -1,71 +1,59 @@
-from typing import List
+# Prompts used by the LLM extractor.
 
-# Preference extraction prompt for FAISS search
-PREFERENCE_EXTRACTION_PROMPT = """You are a route planning assistant. Extract ONLY the user's preferences and interests from their route request.
+PREFERENCE_EXTRACTION_PROMPT = """Extract short, comma-separated preferences from a route request.
 
-USER REQUEST: "{user_prompt}"
+User request:
+{user_prompt}
 
-Extract and return ONLY the preferences and interests that would help find relevant places/amenities along the route. 
-Focus on:
-- Types of places they want to see (parks, waterfronts, etc.)
-- Atmosphere preferences (quiet, bustling, scenic, etc.)
-- Specific amenities or features they mentioned (coffee shops, greenery, etc.)
-
-Ignore:
-- Mode of transport (walking, cycling, driving, etc.)
-- Constraints/avoidances (avoid hills, avoid stairs, etc.)
-- Origin and final destination (we are only interested in the preferences ALONG THE ROUTE)
-
-Respond with ONLY a clean, concise list of preferences separated by commas. Do not include origin/destination or constraints. Do not include any extra text besides the list.
-
-Example:
-User: "Take me from Union Square to Golden Gate Park, avoiding hills. I want to see coffee shops and waterfronts."
-Response: "coffee shops, waterfronts, scenic views"
+Return ONLY a comma-separated list of concise preference concepts (no extra text).
+Examples of concepts: "parks, viewpoints, scenic, waterfront, coffee".
 """
 
-# Enhanced extraction prompt template with FAISS candidate selection
-def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: List[str], num_tags: int = 5) -> str:
-    """Create the extraction prompt with candidate OSM tags for LLM selection."""
-    candidate_text = "\n".join([f"- {tag}" for tag in candidate_tags])
-    return f"""You are a route planning assistant. Extract structured information from the user's route request.
+def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: list[str], num_tags: int) -> str:
+    """
+    Ask the LLM to produce a strict JSON object we can parse.
 
-USER REQUEST: "{user_prompt}"
+    Required JSON keys:
+      origin (string)
+      destination (string)
+      time_flexibility_minutes (integer)
+      waypoint_queries (array of strings length <= num_tags; MUST be chosen from the candidate list below)
+      constraints (object: avoid_tolls, avoid_stairs, avoid_hills, avoid_highways, transport_mode)
 
-CANDIDATE OSM TAGS (choose the most relevant ones):
-{candidate_text}
+    IMPORTANT:
+    - waypoint_queries MUST be selected from this candidate list (exact key=value matches).
+    - Return ONLY JSON, no backticks, no prose.
+    """
 
-Please extract the following information and respond with ONLY a valid JSON object:
+    candidates_block = "\n".join(f"- {c}" for c in candidate_tags)
+    return f"""
+You are a strict JSON generator.
 
-1. ORIGIN: The starting location (be specific with city/neighborhood if mentioned)
-2. DESTINATION: The ending location (be specific with city/neighborhood if mentioned)
-3. TIME_FLEXIBILITY: How many extra minutes the user is willing to spend (extract from phrases like "extra 15 minutes", "spare 20 minutes", "willing to spend X more minutes")
-4. WAYPOINT_QUERIES: Select the {num_tags} MOST RELEVANT OSM tags from the candidates above that match the user's preferences. 
-   - Return them in order of relevance (best match first)
-   - Use the format "key=value" (e.g., "amenity=cafe", "leisure=park")
-   - Choose exactly {num_tags} tags, no more, no less
-5. CONSTRAINTS: Extract routing constraints:
-   - "avoid tolls" → avoid_tolls: true
-   - "no stairs" → avoid_stairs: true
-   - "avoid hills" → avoid_hills: true
-   - "no highways" → avoid_highways: true
-   - "walking only" → transport_mode: "walking"
+User request:
+{user_prompt}
 
-RESPOND WITH ONLY THIS JSON FORMAT. DO NOT ADD ANY OTHER TEXT. DO NOT INCLUDE ANY EXPLANATORY COMMENTS:
+Candidate OSM tags (pick up to {num_tags}):
+{candidates_block}
+
+IMPORTANT SELECTION GUIDELINES:
+- Prefer common tags over rare ones (e.g., "natural=water" over "waterway=seaway")
+- For coastal/waterfront: prefer "natural=water", "natural=beach", "natural=coastline", "leisure=marina"
+- For scenic/views: prefer "tourism=viewpoint", "leisure=park", "natural=peak"
+- For parks/green: prefer "leisure=park", "leisure=garden", "landuse=forest"
+- Avoid very specific tags that may not exist in urban areas
+
+Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
 {{
-    "origin": "specific location",
-    "destination": "specific location", 
-    "time_flexibility_minutes": number,
-    "waypoint_queries": ["key=value", "key=value", "key=value", "key=value", "key=value"],
-    "constraints": {{
-        "avoid_tolls": boolean,
-        "avoid_stairs": boolean,
-        "avoid_hills": boolean,
-        "avoid_highways": boolean,
-        "transport_mode": "walking|driving|cycling"
-    }}
+  "origin": "string",
+  "destination": "string",
+  "time_flexibility_minutes": 10,
+  "waypoint_queries": ["key=value", "..."],
+  "constraints": {{
+    "avoid_tolls": false,
+    "avoid_stairs": false,
+    "avoid_hills": false,
+    "avoid_highways": false,
+    "transport_mode": "driving"
+  }}
 }}
-
-If information is not specified, use reasonable defaults:
-- time_flexibility_minutes: 10
-- waypoint_queries: [] (only include tags from the candidates above, exactly {num_tags} tags)
-- constraints: {{"avoid_tolls": false, "avoid_stairs": false, "avoid_hills": false, "avoid_highways": false, "transport_mode": "walking"}}"""
+"""

@@ -310,41 +310,9 @@ class RouteOrchestrator:
             timings["score_rank"] = time.time() - t
 
             # -------- 8) API formatting --------
-            def _route_to_api(o: RouteScore, route_index: int) -> Dict[str, Any]:
+            def _route_to_api(o: RouteScore) -> Dict[str, Any]:
                 r = o.route
-                
-                # Extract features from waypoint categories and input queries
-                features = []
-                for w in r.waypoints:
-                    if w.category and w.category not in features:
-                        features.append(w.category)
-                    # Add input_query as feature if it looks like an OSM tag
-                    if w.input_query and '=' in w.input_query and w.input_query not in features:
-                        features.append(w.input_query)
-                
-                # Create a descriptive "why" based on waypoints and score
-                waypoint_names = [w.name for w in r.waypoints if w.name]
-                if waypoint_names:
-                    why = f"This route includes {len(waypoint_names)} scenic waypoint{'s' if len(waypoint_names) != 1 else ''}: {', '.join(waypoint_names[:3])}{'...' if len(waypoint_names) > 3 else ''}."
-                else:
-                    why = "Direct route optimized for your preferences."
-                
-                # Generate Google/Apple Maps links
-                origin_coords = f"{r.origin.latitude},{r.origin.longitude}"
-                dest_coords = f"{r.destination.latitude},{r.destination.longitude}"
-                
-                # Build waypoint parameter for URLs
-                waypoint_coords = [f"{w.coordinates.latitude},{w.coordinates.longitude}" for w in r.waypoints]
-                
-                google_url = f"https://www.google.com/maps/dir/{origin_coords}/{dest_coords}"
-                if waypoint_coords:
-                    google_url += "/" + "/".join(waypoint_coords)
-                
-                # Apple Maps uses simpler format
-                apple_url = f"https://maps.apple.com/?saddr={origin_coords}&daddr={dest_coords}"
-                
                 return {
-                    "id": str(route_index + 1),  # 1-indexed for UI
                     "score": round(float(o.overall_score), 3),
                     "scores": {
                         "clip": round(float(o.clip_score), 3),
@@ -377,23 +345,9 @@ class RouteOrchestrator:
                         }
                         for s in r.segments
                     ],
-                    "features": features,
-                    "why": why,
-                    "links": {
-                        "google": google_url,
-                        "apple": apple_url,
-                    },
-                    "coordinates": {
-                        "origin": {"lat": r.origin.latitude, "lng": r.origin.longitude},
-                        "destination": {"lat": r.destination.latitude, "lng": r.destination.longitude},
-                        "waypoints": [
-                            {"lat": w.coordinates.latitude, "lng": w.coordinates.longitude, "name": w.name}
-                            for w in r.waypoints
-                        ],
-                    },
                 }
 
-            api_routes = [_route_to_api(x, i) for i, x in enumerate(top)]
+            api_routes = [_route_to_api(x) for x in top]
 
             total_time = time.time() - t0
             timings["total"] = total_time
@@ -404,8 +358,6 @@ class RouteOrchestrator:
                 "metadata": {
                     "total_routes_generated": len(routes),
                     "waypoints_found": len(waypoints),
-                    "origin_text": origin_text,
-                    "destination_text": dest_text,
                     "timings": timings,
                 },
             }
