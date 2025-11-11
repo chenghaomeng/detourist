@@ -12,9 +12,9 @@ services:
       - POI_API_KEY=${POI_API_KEY}
       - ROUTING_API_KEY=${ROUTING_API_KEY}
       - CLIP_MODEL_PATH=/app/models/clip_model.pth
-      # 🚀 Using LOCAL Ollama (faster) - set to http://ollama:11434/... to use Docker Ollama instead
-      - OPENAI_COMPATIBLE_URL=http://host.docker.internal:11434/v1/chat/completions
-      - OPENAI_COMPATIBLE_API_KEY=dummy-key
+      # 🚀 Using Docker Ollama
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.1:8b-instruct-q4_K_M
       # Redis connection (use Docker service name)
       - REDIS_URL=redis://redis:6379/0
       # 🎨 CLIP Scoring Configuration
@@ -29,14 +29,14 @@ services:
     depends_on:
       redis:
         condition: service_started
+      ollama:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    extra_hosts:
-      - "host.docker.internal:host-gateway"  # Required for LOCAL Ollama connection
     restart: unless-stopped
 
   frontend:
@@ -56,19 +56,16 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ⚠️ Docker Ollama - DISABLED (using local Ollama instead for better performance)
-  # Uncomment this section if you want to use Docker Ollama:
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   environment:
-  #     - OLLAMA_HOST=0.0.0.0
-  #     - OLLAMA_KEEP_ALIVE=10m
-  #     - OLLAMA_GPU_LAYERS=35
-  #   restart: unless-stopped
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=10m
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -80,4 +77,4 @@ services:
 
 volumes:
   redis_data:
-  # ollama_data:  # Not needed when using local Ollama
+  ollama_data:
