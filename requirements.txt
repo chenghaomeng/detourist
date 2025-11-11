@@ -10,6 +10,7 @@ Pillow==10.0.0
 numpy==1.26.4
 
 # CLIP / Transformers (CPU wheels)
+# Note: Using --extra-index-url for CPU wheels, so +cpu suffix not needed
 transformers==4.41.2
 torch==2.4.1
 torchvision==0.19.1
@@ -17,5 +18,8 @@ torchvision==0.19.1
 # vector search (optional; harmless if unused at runtime)
 faiss-cpu==1.7.4
 sentence-transformers>=2.2.2
+
+# NLP libraries for evaluation
+nltk>=3.8.1
 
 # DO NOT INSTALL: mapillary

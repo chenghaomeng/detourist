@@ -100,16 +100,23 @@ async def health_check(orch: RouteOrchestrator = Depends(get_orchestrator)):
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Service unhealthy: {str(e)}")
 
+<<<<<<< HEAD
 @app.get("/healthz", response_model=Dict[str, str])   # fast probe for k8s
 async def healthz():
     return {"status": "ok"}
 
+=======
+@app.get("/healthz", response_model=Dict[str, str])   # fast probe
+async def healthz():
+    return {"status": "ok"}
+>>>>>>> origin/main
 
 @app.post("/generate-routes", response_model=RouteGenerationResponse)
 async def generate_routes(
     request: RouteGenerationRequest,
     orch: RouteOrchestrator = Depends(get_orchestrator)
 ):
+<<<<<<< HEAD
     """
     Generate routes from natural language prompt.
     
@@ -120,16 +127,24 @@ async def generate_routes(
     Returns:
         RouteGenerationResponse with generated routes
     """
+=======
+>>>>>>> origin/main
     try:
         internal = RouteRequest(
             user_prompt=request.user_prompt,
             max_results=request.max_results,
+<<<<<<< HEAD
             # Pass optional UI overrides through to orchestrator
+=======
+>>>>>>> origin/main
             origin=request.origin.dict() if request.origin else None,
             destination=request.destination.dict() if request.destination else None,
             time=request.time.dict() if request.time else None,
         )
+<<<<<<< HEAD
         
+=======
+>>>>>>> origin/main
         resp = orch.generate_routes(internal)
 
         # Normalize orchestrator output (dict OR dataclass) to a dict:

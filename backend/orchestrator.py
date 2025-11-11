@@ -1,8 +1,7 @@
-
 # backend/orchestrator.py
 ###################### Tazrian's Update Oct 12, 2025 #####################################
 
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import logging
 import time
@@ -23,7 +22,7 @@ from backend.scoring.route_scorer import RouteScorer, RouteScore
 
 # -------------------- Small Redis JSON cache --------------------
 class Cache:
-    def __init__(self, url: str | None = None):
+    def __init__(self, url: Optional[str] = None):
         self.client = Redis.from_url(url or os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
     @staticmethod
@@ -37,38 +36,57 @@ class Cache:
         val = self.client.get(key)
         return json.loads(val) if val else None
 
-    def set_json(self, namespace: str, payload: Dict[str, Any], value: Dict[str, Any], ttl_seconds: int = 600) -> None:
+    def set_json(
+        self,
+        namespace: str,
+        payload: Dict[str, Any],
+        value: Dict[str, Any],
+        ttl_seconds: int = 600,
+    ) -> None:
         key = self._hash_key(namespace, payload)
         self.client.setex(key, timedelta(seconds=ttl_seconds), json.dumps(value))
 
 
+# ---------- API-facing dataclasses ----------
 @dataclass
 class RouteRequest:
     user_prompt: str
     max_results: int = 5
-    origin: Optional[Dict[str, Any]] = None   # {"text":..., "lat":..., "lon":...}
-    destination: Optional[Dict[str, Any]] = None
-    time: Optional[Dict[str, Any]] = None     # {"max_duration_min":..., "departure_time_utc":...}
+    # Optional explicit inputs from UI (override LLM if present)
+    origin: Optional[Dict[str, Any]] = None         # {"text":..., "lat":..., "lon":...}
+    destination: Optional[Dict[str, Any]] = None    # {"text":..., "lat":..., "lon":...}
+    time: Optional[Dict[str, Any]] = None           # {"max_duration_min":..., "departure_time_utc":...}
+
+
+@dataclass
+class RouteResponse:
+    # Keep generic dicts for API layer compatibility
+    routes: List[Dict[str, Any]]
+    processing_time_seconds: float
+    metadata: Dict[str, Any]
 
 
 class RouteOrchestrator:
     """Main orchestrator for the route generation pipeline."""
-    
+
     def __init__(self, config: Dict[str, str]):
         self.config = config
-        
+
         # Initialize modules
         self.extractor = LLMExtractor(config.get("llm_api_key", ""))
+
         # Mapbox tokens used by both Geocoder and RouteBuilder
         mapbox_key = config.get("geocoding_api_key", "") or config.get("routing_api_key", "")
         self.geocoder = Geocoder(mapbox_key)
         self.waypoint_searcher = WaypointSearcher(config.get("poi_api_key", ""))  # Overpass; key unused
         self.route_builder = RouteBuilder(mapbox_key)
+
+        # CLIP/Mapillary: use env-friendly config
         self.route_scorer = RouteScorer(
-            clip_model_name=config.get("clip_model_name", "openai/clip-vit-base-patch32"),
-            mapillary_token=config.get("mapillary_token", "") or None
+            clip_model_name=os.getenv("CLIP_MODEL_NAME", config.get("clip_model_name", "openai/clip-vit-base-patch32")),
+            mapillary_token=os.getenv("MAPILLARY_TOKEN", config.get("mapillary_token", "")) or None,
         )
-        
+
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
@@ -178,10 +196,10 @@ class RouteOrchestrator:
         return f"{w.name}:{round(w.coordinates.latitude,6)}:{round(w.coordinates.longitude,6)}"
 
     # -------------------- Main entrypoint --------------------
-    def generate_routes(self, request: RouteRequest) -> Dict[str, Any]:
+    def generate_routes(self, request: RouteRequest) -> RouteResponse:
         """
         Generate routes based on user prompt.
-        Returns a dict directly consumable by the API layer.
+        Returns a RouteResponse (API layer serializes it).
         """
         t0 = time.time()
         timings: Dict[str, float] = {}
@@ -197,23 +215,31 @@ class RouteOrchestrator:
                 ep = ExtractedParameters(**cached_llm)
             else:
                 ep = self.extractor.extract_parameters(request.user_prompt)
-                # Persist as dict (ExtractedParameters is a dataclass)
-                self.cache.set_json("llm_extract_v1", llm_key, {
-                    "origin": ep.origin,
-                    "destination": ep.destination,
-                    "time_flexibility_minutes": ep.time_flexibility_minutes,
-                    "waypoint_queries": ep.waypoint_queries,
-                    "constraints": ep.constraints,
-                }, ttl_seconds=1800)
+                # Persist as dict (avoid dataclass serialization ambiguity)
+                self.cache.set_json(
+                    "llm_extract_v1",
+                    llm_key,
+                    {
+                        "origin": ep.origin,
+                        "destination": ep.destination,
+                        "time_flexibility_minutes": ep.time_flexibility_minutes,
+                        "waypoint_queries": ep.waypoint_queries,
+                        "constraints": ep.constraints,
+                        "preferences": ep.preferences,
+                    },
+                    ttl_seconds=1800,
+                )
             timings["llm_extract"] = time.time() - t
 
-            # -------- 2) Apply UI overrides (do not mutate ep types) --------
+            # -------- 2) Apply UI overrides --------
             max_additional_minutes = ep.time_flexibility_minutes or 30
             if request.time and isinstance(request.time.get("max_duration_min"), int):
                 max_additional_minutes = request.time["max_duration_min"]
 
             origin_text = request.origin["text"] if (request.origin and request.origin.get("text")) else ep.origin
-            dest_text   = request.destination["text"] if (request.destination and request.destination.get("text")) else ep.destination
+            dest_text = (
+                request.destination["text"] if (request.destination and request.destination.get("text")) else ep.destination
+            )
 
             # -------- 3) Geocode origin/destination in parallel (cache) --------
             self.logger.info("Geocoding origin and destination")
@@ -230,29 +256,36 @@ class RouteOrchestrator:
 
             # If UI supplied lat/lon, use them; else geocode
             if request.origin and request.origin.get("lat") is not None and request.origin.get("lon") is not None:
-                origin_coords = Coordinates(latitude=float(request.origin["lat"]), longitude=float(request.origin["lon"]))
+                origin_coords = Coordinates(
+                    latitude=float(request.origin["lat"]),
+                    longitude=float(request.origin["lon"]),
+                )
             else:
                 f1 = self.pool.submit(_cached_geocode, origin_text)
 
             if request.destination and request.destination.get("lat") is not None and request.destination.get("lon") is not None:
-                dest_coords = Coordinates(latitude=float(request.destination["lat"]), longitude=float(request.destination["lon"]))
+                dest_coords = Coordinates(
+                    latitude=float(request.destination["lat"]),
+                    longitude=float(request.destination["lon"]),
+                )
             else:
                 f2 = self.pool.submit(_cached_geocode, dest_text)
 
             if "origin_coords" not in locals():  # if not set by UI
                 origin_coords = f1.result()
-            if "dest_coords" not in locals():    # if not set by UI
+            if "dest_coords" not in locals():  # if not set by UI
                 dest_coords = f2.result()
             timings["geocode"] = time.time() - t
 
             # -------- 4) Build search zone (cache) --------
             self.logger.info("Creating search zone")
             t = time.time()
+            transport_mode = (ep.constraints or {}).get("transport_mode", "walking")
             zone_key = {
                 "o": self._coords_to_dict(origin_coords),
                 "d": self._coords_to_dict(dest_coords),
                 "max_additional": int(max_additional_minutes),
-                "mode": ep.constraints.get("transport_mode", "walking"),
+                "mode": transport_mode,
             }
             cached_zone = self.cache.get_json("search_zone_v1", zone_key)
             if cached_zone:
@@ -262,7 +295,7 @@ class RouteOrchestrator:
                     origin=origin_coords,
                     destination=dest_coords,
                     max_additional_time=int(max_additional_minutes),
-                    transport_mode=ep.constraints.get("transport_mode", "walking"),
+                    transport_mode=transport_mode,
                 )
                 self.cache.set_json("search_zone_v1", zone_key, self._zone_to_dict(search_zone), ttl_seconds=1800)
             timings["search_zone"] = time.time() - t
@@ -271,10 +304,7 @@ class RouteOrchestrator:
             self.logger.info("Searching for waypoints via Overpass")
             t = time.time()
             waypoint_queries = ep.waypoint_queries or []
-            wp_key = {
-                "zone": zone_key,  # stable hash via nested dicts
-                "queries": waypoint_queries,
-            }
+            wp_key = {"zone": zone_key, "queries": waypoint_queries}
             cached_wps = self.cache.get_json("waypoints_v1", wp_key)
             if cached_wps:
                 waypoints = [self._wp_from_dict(w) for w in cached_wps]
@@ -304,47 +334,27 @@ class RouteOrchestrator:
             # -------- 7) Score & rank (batch) --------
             self.logger.info("Scoring routes (CLIP + efficiency + relevance)")
             t = time.time()
-            scored: List[RouteScore] = self.route_scorer.score_routes(routes, request.user_prompt)
+
+            use_images = os.getenv("ENABLE_SCORING", "false").lower() == "true"
+            min_imgs = int(os.getenv("SCORING_MIN_IMAGES", "3" if use_images else "0"))
+            max_imgs = int(os.getenv("SCORING_MAX_IMAGES", "6" if use_images else "0"))
+
+            scored: List[RouteScore] = self.route_scorer.score_routes(
+                routes,
+                request.user_prompt,
+                min_images_per_route=min_imgs,
+                max_images_per_route=max_imgs,
+            )
+
             scored.sort(key=lambda s: s.overall_score, reverse=True)
-            top = scored[: max(1, int(request.max_results or 5))]
+            max_results = max(1, int(request.max_results or 5))
+            top = scored[:max_results]
             timings["score_rank"] = time.time() - t
 
             # -------- 8) API formatting --------
-            def _route_to_api(o: RouteScore, route_index: int) -> Dict[str, Any]:
+            def _route_to_api(o: RouteScore) -> Dict[str, Any]:
                 r = o.route
-                
-                # Extract features from waypoint categories and input queries
-                features = []
-                for w in r.waypoints:
-                    if w.category and w.category not in features:
-                        features.append(w.category)
-                    # Add input_query as feature if it looks like an OSM tag
-                    if w.input_query and '=' in w.input_query and w.input_query not in features:
-                        features.append(w.input_query)
-                
-                # Create a descriptive "why" based on waypoints and score
-                waypoint_names = [w.name for w in r.waypoints if w.name]
-                if waypoint_names:
-                    why = f"This route includes {len(waypoint_names)} scenic waypoint{'s' if len(waypoint_names) != 1 else ''}: {', '.join(waypoint_names[:3])}{'...' if len(waypoint_names) > 3 else ''}."
-                else:
-                    why = "Direct route optimized for your preferences."
-                
-                # Generate Google/Apple Maps links
-                origin_coords = f"{r.origin.latitude},{r.origin.longitude}"
-                dest_coords = f"{r.destination.latitude},{r.destination.longitude}"
-                
-                # Build waypoint parameter for URLs
-                waypoint_coords = [f"{w.coordinates.latitude},{w.coordinates.longitude}" for w in r.waypoints]
-                
-                google_url = f"https://www.google.com/maps/dir/{origin_coords}/{dest_coords}"
-                if waypoint_coords:
-                    google_url += "/" + "/".join(waypoint_coords)
-                
-                # Apple Maps uses simpler format
-                apple_url = f"https://maps.apple.com/?saddr={origin_coords}&daddr={dest_coords}"
-                
                 return {
-                    "id": str(route_index + 1),  # 1-indexed for UI
                     "score": round(float(o.overall_score), 3),
                     "scores": {
                         "clip": round(float(o.clip_score), 3),
@@ -377,38 +387,22 @@ class RouteOrchestrator:
                         }
                         for s in r.segments
                     ],
-                    "features": features,
-                    "why": why,
-                    "links": {
-                        "google": google_url,
-                        "apple": apple_url,
-                    },
-                    "coordinates": {
-                        "origin": {"lat": r.origin.latitude, "lng": r.origin.longitude},
-                        "destination": {"lat": r.destination.latitude, "lng": r.destination.longitude},
-                        "waypoints": [
-                            {"lat": w.coordinates.latitude, "lng": w.coordinates.longitude, "name": w.name}
-                            for w in r.waypoints
-                        ],
-                    },
                 }
 
-            api_routes = [_route_to_api(x, i) for i, x in enumerate(top)]
+            api_routes = [_route_to_api(x) for x in top]
 
             total_time = time.time() - t0
             timings["total"] = total_time
 
-            return {
-                "routes": api_routes,
-                "processing_time_seconds": total_time,
-                "metadata": {
+            return RouteResponse(
+                routes=api_routes,
+                processing_time_seconds=total_time,
+                metadata={
                     "total_routes_generated": len(routes),
                     "waypoints_found": len(waypoints),
-                    "origin_text": origin_text,
-                    "destination_text": dest_text,
                     "timings": timings,
                 },
-            }
+            )
 
         except Exception as e:
             self.logger.exception("Error generating routes: %s", e)

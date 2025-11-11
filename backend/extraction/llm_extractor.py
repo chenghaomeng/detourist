@@ -27,6 +27,7 @@ class ExtractedParameters:
     time_flexibility_minutes: int
     waypoint_queries: List[str]
     constraints: Dict[str, object]
+    preferences: str  # Simplified, comma-separated preferences string
 
 
 class LLMExtractor:
@@ -53,9 +54,9 @@ class LLMExtractor:
             raw = self.provider_manager.extract_parameters(extraction_prompt, expect_json=True)
             data = self._parse_llm_response(raw)
 
-            params = self._create_extracted_parameters(data)
-            self.logger.info("LLM extractor ok | origin=%s dest=%s tags=%s",
-                             params.origin, params.destination, params.waypoint_queries)
+            params = self._create_extracted_parameters(data, preferences)
+            self.logger.info("LLM extractor ok | origin=%s dest=%s tags=%s preferences=%s",
+                             params.origin, params.destination, params.waypoint_queries, params.preferences)
             return params
 
         except Exception as e:
@@ -77,7 +78,7 @@ class LLMExtractor:
             self.logger.error(f"Failed to parse LLM JSON: {e}. Response head: {response[:300]}")
             raise
 
-    def _create_extracted_parameters(self, data: Dict) -> ExtractedParameters:
+    def _create_extracted_parameters(self, data: Dict, preferences: str) -> ExtractedParameters:
         constraints = data.get("constraints", {}) or {}
         wq = [q for q in data.get("waypoint_queries", []) if isinstance(q, str) and q.strip()]
         return ExtractedParameters(
@@ -90,6 +91,7 @@ class LLMExtractor:
                 "avoid_stairs": bool(constraints.get("avoid_stairs", False)),
                 "avoid_hills": bool(constraints.get("avoid_hills", False)),
                 "avoid_highways": bool(constraints.get("avoid_highways", False)),
-                "transport_mode": constraints.get("transport_mode", "driving"),
+                "transport_mode": constraints.get("transport_mode", "walking"),
             },
+            preferences=preferences,
         )

@@ -53,7 +53,11 @@ Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
     "avoid_stairs": false,
     "avoid_hills": false,
     "avoid_highways": false,
-    "transport_mode": "driving"
+    "transport_mode": "walking"
   }}
 }}
+
+IMPORTANT:
+- waypoint_queries MUST be selected from the candidate list (exact key=value matches).
+- when extracting the origin and destination, always be as specific as possible and include the city or town.
 """

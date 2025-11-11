@@ -3,26 +3,26 @@ services:
   backend:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - LLM_API_KEY=${LLM_API_KEY}
-      - GEOCODING_API_KEY=${GEOCODING_API_KEY}
-      - POI_API_KEY=${POI_API_KEY}
+      # Required API keys
       - ROUTING_API_KEY=${ROUTING_API_KEY}
-      - CLIP_MODEL_PATH=/app/models/clip_model.pth
-      # 🚀 Using Docker Ollama
+      - GEOCODING_API_KEY=${GEOCODING_API_KEY}
+      # Optional API keys
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - MAPILLARY_TOKEN=${MAPILLARY_TOKEN:-}
+      # 🚀 Docker Ollama configuration
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=llama3.1:8b-instruct-q4_K_M
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       # Redis connection (use Docker service name)
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       # 🎨 CLIP Scoring Configuration
-      - ENABLE_SCORING=true
-      - SCORING_MIN_IMAGES=3
-      - SCORING_MAX_IMAGES=10
-      - MAPILLARY_TOKEN=${MAPILLARY_TOKEN}
-      - CLIP_MODEL_NAME=openai/clip-vit-base-patch32
+      - CLIP_MODEL_NAME=${CLIP_MODEL_NAME:-openai/clip-vit-base-patch32}
+      - ENABLE_SCORING=${ENABLE_SCORING:-true}
+      - SCORING_MIN_IMAGES=${SCORING_MIN_IMAGES:-3}
+      - SCORING_MAX_IMAGES=${SCORING_MAX_IMAGES:-10}
     volumes:
       - ./models:/app/models
       - ./logs:/app/logs
