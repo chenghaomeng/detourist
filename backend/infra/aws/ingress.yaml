@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: har-backend-ing
+  namespace: har-local
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # For HTTPS with domain, add  ACM cert ARN (in us-east-1):
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:399966706871:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+spec:
+  # If a domain is bought and validated an ACM cert, add:
+  # rules:
+  # - host: api.yourdomain.com
+  #   http:
+  #     paths:
+  #     - path: /
+  #       pathType: Prefix
+  #       backend:
+  #         service:
+  #           name: har-backend-svc
+  #           port:
+  #             number: 8000
+  # Otherwise omit host, and it will use the ALB DNS for now:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: har-backend-svc
+            port:
+              number: 8000
