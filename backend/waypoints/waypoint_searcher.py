@@ -18,7 +18,9 @@ from shapely.geometry import Point, Polygon
 from backend.geocoding.geocoder import SearchZone, Coordinates
 
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Alternative Overpass instances (main is often overloaded)
+# OVERPASS_URL = "https://overpass-api.de/api/interpreter"  # Main (often overloaded)
+OVERPASS_URL = "https://overpass.kumi.systems/api/interpreter"  # Alternative instance
 USER_AGENT = "berkeley-detourist/1.0 (berkeley.edu)"
 
 
