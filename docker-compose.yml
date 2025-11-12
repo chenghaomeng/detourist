@@ -48,6 +48,7 @@ services:
     environment:
       - VITE_BACKEND_URL=http://backend:8000
       - VITE_OPENAI_API_KEY=${VITE_OPENAI_API_KEY}
+      - VITE_GOOGLE_MAPS_API_KEY=${VITE_GOOGLE_MAPS_API_KEY}
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
