@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ScoringWeights:
     """Weights for different scoring components."""
-    clip_weight: float = 0.4
-    duration_weight: float = 0.3
+    clip_weight: float = 0.2
+    duration_weight: float = 0.5
     waypoint_relevance_weight: float = 0.3
 
 
@@ -329,18 +329,12 @@ class RouteScorer:
 
     def _calculate_preference_match_score(self, route: Route) -> float:
         if not route.waypoints:
-            return -1.0
+            return 0
         avg_rel = float(np.mean([w.relevance_score for w in route.waypoints]))
         bonus = 1.0 + self.waypoint_bonus_rate * (len(route.waypoints) - 1)
         return float(min(100.0, avg_rel * bonus))
 
     def _combine_scores(self, clip_score: float, efficiency_score: float, preference_score: float) -> float:
-        if preference_score < 0:
-            w = self.weights
-            tot = w.clip_weight + w.duration_weight
-            cw = w.clip_weight / tot if tot > 0 else 0.5
-            dw = w.duration_weight / tot if tot > 0 else 0.5
-            return cw * clip_score + dw * efficiency_score
         return (
             self.weights.clip_weight * clip_score
             + self.weights.duration_weight * efficiency_score
