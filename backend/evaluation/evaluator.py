@@ -600,6 +600,7 @@ class RouteEvaluator:
             self.logger.info("Step 3d: Built %d candidate routes", len(llm_routes))
 
             # Score LLM routes
+            # Use evaluation_mode=False for route selection so preference scores are included (matches production)
             self.logger.info("Step 3.5: Scoring LLM routes")
             # Use reasonable image limits for evaluation (if CLIP scoring is enabled)
             use_images = os.getenv("ENABLE_SCORING", "false").lower() == "true"
@@ -610,15 +611,29 @@ class RouteEvaluator:
                 user_prompt=example.user_prompt,
                 min_images_per_route=min_imgs,
                 max_images_per_route=max_imgs,
-                evaluation_mode=True,
+                evaluation_mode=False,  # Include preference scores for route selection (matches production)
             )
             llm_best_score = llm_scored[0].overall_score if llm_scored else 0.0
+            llm_best_route = llm_scored[0].route if llm_scored else None
             self.logger.info(
                 "LLM routes scored: %d routes, best score=%.3f, best CLIP=%.3f",
                 len(llm_scored),
                 llm_best_score,
                 llm_scored[0].clip_score if llm_scored else 0.0,
             )
+            
+            # Re-score best LLM route with evaluation_mode=True (no preference) for comparison
+            # Keep original llm_scored for return value, use llm_best_rescored for comparison
+            llm_best_rescored = None
+            if llm_best_route:
+                self.logger.info("Step 3.6: Re-scoring best LLM route (without preference for comparison)")
+                llm_best_rescored = self.route_scorer.score_routes(
+                    routes=[llm_best_route],
+                    user_prompt=example.user_prompt,
+                    min_images_per_route=min_imgs,
+                    max_images_per_route=max_imgs,
+                    evaluation_mode=True,  # Exclude preference scores for comparison
+                )
 
             # Step 4: Build ground truth route (single route using ALL provided waypoints)
             self.logger.info("Step 4: Building ground truth route (using all %d waypoints)", len(example.waypoint_coords))
@@ -638,14 +653,15 @@ class RouteEvaluator:
             gt_routes = [gt_route]  # Single definitive route
 
             # Score ground truth routes
-            self.logger.info("Step 4.5: Scoring ground truth routes")
+            # Use evaluation_mode=True (no preference) since GT routes don't need preference matching
+            self.logger.info("Step 4.5: Scoring ground truth routes (no preference)")
             # Use same image limits as LLM routes
             gt_scored = self.route_scorer.score_routes(
                 routes=gt_routes,
                 user_prompt=example.user_prompt,
                 min_images_per_route=min_imgs,
                 max_images_per_route=max_imgs,
-                evaluation_mode=True,
+                evaluation_mode=True,  # No preference scores for GT routes
             )
             gt_best_score = gt_scored[0].overall_score if gt_scored else 0.0
             self.logger.info(
@@ -656,16 +672,75 @@ class RouteEvaluator:
             )
 
             # Step 5: Compare scores
+            # Normalize CLIP scores relative to both LLM and GT routes for fair comparison
+            # This allows us to use the standard overall score calculation without worrying about scale
+            
+            # Use re-scored LLM route (without preference) for comparison, or fallback to original
+            llm_for_comparison = llm_best_rescored if llm_best_rescored else llm_scored
+            
+            # Find max absolute CLIP score across both batches
+            max_absolute_clip = 0.0
+            for scored in llm_for_comparison:
+                abs_clip = getattr(scored, 'clip_score_absolute', None)
+                if abs_clip is None:
+                    abs_clip = scored.clip_score  # Fallback to relative if absolute not available
+                max_absolute_clip = max(max_absolute_clip, abs_clip)
+            for scored in gt_scored:
+                abs_clip = getattr(scored, 'clip_score_absolute', None)
+                if abs_clip is None:
+                    abs_clip = scored.clip_score  # Fallback to relative if absolute not available
+                max_absolute_clip = max(max_absolute_clip, abs_clip)
+            
+            # Use 1.0 as default if no scores found
+            if max_absolute_clip == 0.0:
+                max_absolute_clip = 1.0
+            
+            # Get best routes for comparison (use re-scored LLM route)
+            llm_best = llm_for_comparison[0] if llm_for_comparison else None
+            gt_best = gt_scored[0] if gt_scored else None
+            
+            # Normalize CLIP scores relative to max across both batches
+            llm_best_absolute_clip = getattr(llm_best, 'clip_score_absolute', None) if llm_best else None
+            if llm_best_absolute_clip is None and llm_best:
+                llm_best_absolute_clip = llm_best.clip_score
+            gt_best_absolute_clip = getattr(gt_best, 'clip_score_absolute', None) if gt_best else None
+            if gt_best_absolute_clip is None and gt_best:
+                gt_best_absolute_clip = gt_best.clip_score
+            
+            llm_best_normalized_clip = (llm_best_absolute_clip / max_absolute_clip * 100) if max_absolute_clip > 0 and llm_best else 0.0
+            gt_best_normalized_clip = (gt_best_absolute_clip / max_absolute_clip * 100) if max_absolute_clip > 0 and gt_best else 0.0
+            
+            # Recalculate overall scores using normalized CLIP scores
+            # Use the scorer's method to keep all scoring logic in one place
+            llm_best_comparison_overall = (
+                self.route_scorer.recompute_overall_score(
+                    clip_score=llm_best_normalized_clip,
+                    efficiency_score=llm_best.efficiency_score,
+                    preference_score=0.0,  # Not used in evaluation_mode
+                    evaluation_mode=True,
+                ) if llm_best else 0.0
+            )
+            gt_best_comparison_overall = (
+                self.route_scorer.recompute_overall_score(
+                    clip_score=gt_best_normalized_clip,
+                    efficiency_score=gt_best.efficiency_score,
+                    preference_score=0.0,  # Not used in evaluation_mode
+                    evaluation_mode=True,
+                ) if gt_best else 0.0
+            )
+            
             # Allow LLM score to be up to 0.5 points lower than GT score and still be considered acceptable
-            score_comparison = llm_best_score >= (gt_best_score - 0.5)
+            score_comparison = llm_best_comparison_overall >= (gt_best_comparison_overall - 0.5)
 
             processing_time = time.time() - start_time
 
             self.logger.info(
-                "Example %s completed: LLM score=%.3f, GT score=%.3f, LLM >= (GT - 0.5): %s",
+                "Example %s completed: LLM score=%.3f (comparison=%.3f), GT score=%.3f (comparison=%.3f), LLM >= (GT - 0.5): %s",
                 example_id,
                 llm_best_score,
+                llm_best_comparison_overall,
                 gt_best_score,
+                gt_best_comparison_overall,
                 score_comparison,
             )
 
@@ -673,8 +748,8 @@ class RouteEvaluator:
                 example_id=example_id,
                 llm_extracted_params=llm_params,
                 extraction_comparison=extraction_comparison,
-                llm_route_score=llm_best_score,
-                ground_truth_route_score=gt_best_score,
+                llm_route_score=llm_best_comparison_overall,  # Use normalized comparison score
+                ground_truth_route_score=gt_best_comparison_overall,  # Use normalized comparison score
                 score_comparison=score_comparison,
                 llm_routes=llm_scored,
                 ground_truth_routes=gt_scored,

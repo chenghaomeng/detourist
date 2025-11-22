@@ -79,21 +79,64 @@ GroundTruthExample(
 
 ## Understanding Results
 
-### Extraction Comparison
-- **Origin/Destination**: Uses hybrid location similarity (exact + Jaccard + substring)
-- **Time Flexibility**: Exact numeric match
-- **Constraints**: Dictionary comparison
-- **Preferences**: Lemmatization + semantic similarity (threshold: 0.7)
+### Evaluation Flow
 
-### Route Score Comparison
-- Compares best LLM-generated route score vs ground truth route score
-- LLM route uses LLM-extracted constraints
-- Ground truth route uses ground truth constraints
-- Both use the same waypoint coordinates (from ground truth)
+The evaluation process follows these steps:
+
+1. **LLM Extraction**: Extract parameters (origin, destination, constraints, preferences, waypoint queries) from the user prompt using the LLM extractor.
+
+2. **Extraction Comparison**: Compare LLM-extracted parameters with ground truth:
+   - **Origin/Destination**: Uses hybrid location similarity (exact + Jaccard + substring)
+   - **Time Flexibility**: Exact numeric match
+   - **Constraints**: Dictionary comparison (order-invariant, transport-mode aware)
+   - **Preferences**: Lemmatization + semantic similarity (threshold: 0.6, 40% match required)
+
+3. **App Route Building** (matches production behavior):
+   - Geocode LLM-extracted origin/destination
+   - Create search zone based on time flexibility
+   - Search for waypoints using LLM-extracted queries
+   - Build multiple candidate routes
+   - **Score routes with preference scores** (`evaluation_mode=False`) to select the best route
+   - **Re-score best route without preference** (`evaluation_mode=True`) for fair comparison
+
+4. **Ground Truth Route Building**:
+   - Build a single definitive route using ALL provided waypoint coordinates
+   - Score without preference (`evaluation_mode=True`) since waypoints are provided directly
+
+5. **Score Comparison**:
+   - Extract absolute CLIP scores from both routes
+   - Normalize CLIP scores relative to the maximum across both routes
+   - Recompute overall scores using normalized CLIP scores (without preference)
+   - Compare: LLM score >= (GT score - 0.5) to pass
+
+### Key Design Decisions
+
+- **Preference scores are used for route selection** (matches production) but **excluded from comparison** (fair evaluation)
+- **CLIP scores are normalized across both routes** to ensure fair comparison regardless of absolute similarity values
+- **Ground truth routes use all provided waypoints** (no selection) to represent the definitive ideal route
+- **App routes go through full pipeline** (waypoint search, route building, scoring) to test real-world behavior
 
 ### Output Format
-- **Console**: Detailed per-example results + batch summary
-- **JSON**: Structured data for programmatic analysis
+
+The evaluation report shows:
+
+- **Extraction Comparison**: Field-by-field comparison of LLM extraction vs ground truth
+- **Route Score Comparison**: 
+  - Comparison overall scores (re-normalized CLIP + efficiency, no preference)
+  - Raw CLIP scores (absolute values for transparency)
+  - Efficiency scores
+  - Image counts
+- **Waypoint Comparison**: Lists waypoints found by app vs provided in ground truth (informational)
+
+**Note**: Preference scores are not shown in the report since they're not used for comparison, but they are used for route selection (matching production behavior).
+
+### Console Output
+- Detailed per-example results with extraction and score breakdowns
+- Batch summary with accuracy statistics
+
+### JSON Export
+- Structured data for programmatic analysis
+- Includes all scores, routes, and comparison metrics
 
 ## Troubleshooting
 

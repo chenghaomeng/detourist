@@ -135,7 +135,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="scenic, parks",
+            preferences="boulevards, landmarks, historic streets, parks",
             waypoint_coords=[
                 Coordinates(latitude=37.7506, longitude=-122.4331),  # La Lucha Coffee Bar
                 Coordinates(latitude=37.7597, longitude=-122.4264),  # Dolores Street
@@ -190,7 +190,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="coastline, cliffside roads",
+            preferences="waterfronts, parks, hills vistas, landmarks",
             waypoint_coords=[
                 Coordinates(latitude=37.7694, longitude=-122.5094),  # Great Highway
                 Coordinates(latitude=37.7855, longitude=-122.5094),  # Sea Cliff / El Camino del Mar
