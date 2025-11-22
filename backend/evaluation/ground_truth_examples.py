@@ -46,11 +46,11 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         GroundTruthExample(
             example_id="sf_civic_golden_gate_001",
             user_prompt="Avoid freeways until Presidio. Prefer Marina/Crissy Field/Palace of fine arts. Destination Golden Gate View Point. Starting point civic center",
-            origin_text="Civic Center",
+            origin_text="Civic Center, San Francisco",
             origin_coords=Coordinates(latitude=37.7770, longitude=-122.4195),
-            destination_text="Golden Gate Bridge Viewpoint",
+            destination_text="Golden Gate View Point, San Francisco",
             destination_coords=Coordinates(latitude=37.8294, longitude=-122.4860),
-            time_flexibility_minutes=15,
+            time_flexibility_minutes=10,
             constraints={
                 "transport_mode": "driving",
                 "avoid_tolls": False,
@@ -75,7 +75,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
             origin_coords=Coordinates(latitude=37.8002, longitude=-122.4414),
             destination_text="Embarcadero, San Francisco, CA",
             destination_coords=Coordinates(latitude=37.7955, longitude=-122.3936),
-            time_flexibility_minutes=15,
+            time_flexibility_minutes=10,
             constraints={
                 "transport_mode": "driving",
                 "avoid_tolls": False,
@@ -83,7 +83,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="historic_streets, landmarks",
+            preferences="historic streets, landmarks",
             waypoint_coords=[
                 Coordinates(latitude=37.8024, longitude=-122.4186),  # Lombard Street
                 Coordinates(latitude=37.8047, longitude=-122.4098),  # Columbus Avenue
@@ -100,7 +100,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
             origin_coords=Coordinates(latitude=37.7506, longitude=-122.4331),
             destination_text="Market and Castro",
             destination_coords=Coordinates(latitude=37.7614, longitude=-122.4350),
-            time_flexibility_minutes=15,
+            time_flexibility_minutes=10,
             constraints={
                 "transport_mode": "driving",
                 "avoid_tolls": False,
@@ -108,7 +108,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="hills_vistas, landmarks, scenic overlook",
+            preferences="hills vistas, landmarks, scenic overlook",
             waypoint_coords=[
                 Coordinates(latitude=37.7506, longitude=-122.4331),  # Noe Valley
                 Coordinates(latitude=37.7506, longitude=-122.4331),  # Clipper St.
@@ -122,12 +122,12 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 5: Chill Coffee in Noe then Japantown
         GroundTruthExample(
             example_id="sf_noe_japantown_001",
-            user_prompt="Drive from la luccha coffee bar to japantown, pass by scenic sf parks.",
-            origin_text="La Lucha Coffee Bar, Noe Valley",
+            user_prompt="Drive from la lucha coffee bar to japantown, pass by scenic sf parks.",
+            origin_text="La Lucha Coffee Bar, San Francisco",
             origin_coords=Coordinates(latitude=37.7506, longitude=-122.4331),
-            destination_text="Japantown Peace Plaza (Post & Buchanan)",
+            destination_text="Japantown, San Francisco (Post & Buchanan)",
             destination_coords=Coordinates(latitude=37.7855, longitude=-122.4297),
-            time_flexibility_minutes=15,
+            time_flexibility_minutes=10,
             constraints={
                 "transport_mode": "driving",
                 "avoid_tolls": False,
@@ -135,7 +135,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="boulevards, landmarks, historic_streets, parks",
+            preferences="scenic, parks",
             waypoint_coords=[
                 Coordinates(latitude=37.7506, longitude=-122.4331),  # La Lucha Coffee Bar
                 Coordinates(latitude=37.7597, longitude=-122.4264),  # Dolores Street
@@ -154,7 +154,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
             origin_coords=Coordinates(latitude=37.7799, longitude=-122.4188),
             destination_text="Coit Tower, San Francisco",
             destination_coords=Coordinates(latitude=37.8024, longitude=-122.4058),
-            time_flexibility_minutes=15,
+            time_flexibility_minutes=10,
             constraints={
                 "transport_mode": "driving",
                 "avoid_tolls": False,
@@ -162,7 +162,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="historic_streets, landmarks",
+            preferences="historic streets, landmarks",
             waypoint_coords=[
                 Coordinates(latitude=37.7799, longitude=-122.4188),  # Civic Center
                 Coordinates(latitude=37.7895, longitude=-122.4206),  # Polk St
@@ -182,7 +182,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
             origin_coords=Coordinates(latitude=37.7694, longitude=-122.5094),
             destination_text="Presidio Tunnel Tops",
             destination_coords=Coordinates(latitude=37.8006, longitude=-122.4581),
-            time_flexibility_minutes=15,
+            time_flexibility_minutes=10,
             constraints={
                 "transport_mode": "driving",
                 "avoid_tolls": False,
@@ -190,13 +190,126 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="waterfronts, parks, hills_vistas, landmarks",
+            preferences="coastline, cliffside roads",
             waypoint_coords=[
                 Coordinates(latitude=37.7694, longitude=-122.5094),  # Great Highway
                 Coordinates(latitude=37.7855, longitude=-122.5094),  # Sea Cliff / El Camino del Mar
                 Coordinates(latitude=37.8199, longitude=-122.4783),  # Golden Gate Overlook (optional)
                 Coordinates(latitude=37.8024, longitude=-122.4488),  # Lincoln Blvd
                 Coordinates(latitude=37.8006, longitude=-122.4581),  # Presidio Tunnel Tops
+            ],
+        ),
+        
+        # Example 8: Mission District to Dolores Park
+        GroundTruthExample(
+            example_id="sf_mission_dolores_001",
+            user_prompt="Walk from Mission District to Dolores Park, I want to see some parks and maybe grab coffee. Can spare 10 minutes.",
+            origin_text="Mission District, San Francisco",
+            origin_coords=Coordinates(latitude=37.7597, longitude=-122.4144),
+            destination_text="Dolores Park, San Francisco",
+            destination_coords=Coordinates(latitude=37.7597, longitude=-122.4264),
+            time_flexibility_minutes=10,
+            constraints={
+                "transport_mode": "walking",
+                "avoid_tolls": False,
+                "avoid_stairs": False,
+                "avoid_hills": False,
+                "avoid_highways": False,
+            },
+            preferences="parks, coffee shops",
+            waypoint_coords=[
+                Coordinates(latitude=37.7597, longitude=-122.4204),  # Coffee shop near park
+            ],
+        ),
+        
+        # Example 9: Financial District to Alcatraz Ferry
+        GroundTruthExample(
+            example_id="sf_fidi_ferry_001",
+            user_prompt="Drive from Financial District to Alcatraz ferry terminal. I want to see some landmarks along the way, avoid highways.",
+            origin_text="Financial District, San Francisco",
+            origin_coords=Coordinates(latitude=37.7946, longitude=-122.4020),
+            destination_text="Alcatraz Ferry Terminal",
+            destination_coords=Coordinates(latitude=37.8086, longitude=-122.4098),
+            time_flexibility_minutes=10,
+            constraints={
+                "transport_mode": "driving",
+                "avoid_tolls": False,
+                "avoid_stairs": False,
+                "avoid_hills": False,
+                "avoid_highways": True,
+            },
+            preferences="landmarks, historic streets",
+            waypoint_coords=[
+                Coordinates(latitude=37.8024, longitude=-122.4058),  # Telegraph Hill / Coit Tower area
+                Coordinates(latitude=37.8047, longitude=-122.4098),  # North Beach landmarks
+            ],
+        ),
+        
+        # Example 10: Embarcadero to Crissy Field
+        GroundTruthExample(
+            example_id="sf_embarcadero_crissy_001",
+            user_prompt="Walk from Embarcadero to Crissy Field, hug the waterfront as much as possible. Avoid stairs.",
+            origin_text="Embarcadero, San Francisco",
+            origin_coords=Coordinates(latitude=37.7955, longitude=-122.3936),
+            destination_text="Crissy Field",
+            destination_coords=Coordinates(latitude=37.8033, longitude=-122.4654),
+            time_flexibility_minutes=10,
+            constraints={
+                "transport_mode": "walking",
+                "avoid_tolls": False,
+                "avoid_stairs": True,
+                "avoid_hills": False,
+                "avoid_highways": False,
+            },
+            preferences="waterfronts, parks",
+            waypoint_coords=[
+                Coordinates(latitude=37.8065, longitude=-122.4387),  # Marina Green waterfront
+            ],
+        ),
+        
+        # Example 11: Hayes Valley to Golden Gate Park
+        GroundTruthExample(
+            example_id="sf_hayes_golden_gate_001",
+            user_prompt="Drive from Hayes Valley to Golden Gate Park, take me through some scenic streets and maybe pass by a landmark. Avoid highways.",
+            origin_text="Hayes Valley, San Francisco",
+            origin_coords=Coordinates(latitude=37.7764, longitude=-122.4247),
+            destination_text="Golden Gate Park, San Francisco",
+            destination_coords=Coordinates(latitude=37.7694, longitude=-122.4862),
+            time_flexibility_minutes=10,
+            constraints={
+                "transport_mode": "driving",
+                "avoid_tolls": False,
+                "avoid_stairs": False,
+                "avoid_hills": False,
+                "avoid_highways": True,
+            },
+            preferences="historic streets, landmarks, scenic routes",
+            waypoint_coords=[
+                Coordinates(latitude=37.7764, longitude=-122.4317),  # Alamo Square (Painted Ladies)
+                Coordinates(latitude=37.7714, longitude=-122.4494),  # Scenic route through park area
+            ],
+        ),
+        
+        # Example 12: Union Square to Chinatown
+        GroundTruthExample(
+            example_id="sf_union_chinatown_001",
+            user_prompt="Walk from Union Square to Chinatown, I want to see historic streets and maybe grab some food. Can spare 15 minutes.",
+            origin_text="Union Square, San Francisco",
+            origin_coords=Coordinates(latitude=37.7880, longitude=-122.4075),
+            destination_text="Chinatown, San Francisco",
+            destination_coords=Coordinates(latitude=37.7946, longitude=-122.4058),
+            time_flexibility_minutes=15,
+            constraints={
+                "transport_mode": "walking",
+                "avoid_tolls": False,
+                "avoid_stairs": False,
+                "avoid_hills": False,
+                "avoid_highways": False,
+            },
+            preferences="historic streets, landmarks, restaurants",
+            waypoint_coords=[
+                Coordinates(latitude=37.7914, longitude=-122.4058),  # Historic street area
+                Coordinates(latitude=37.7946, longitude=-122.4058),  # Chinatown entrance
             ],
         ),
     ]
