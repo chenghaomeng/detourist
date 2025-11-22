@@ -110,23 +110,29 @@ def format_result_summary(result: EvaluationResult) -> str:
             lines.append(f"  Score Difference:      {diff:+.3f}")
     
     # Best route details
+    # Show comparison scores (re-normalized) and raw CLIP scores
+    # Preference scores are NOT shown since they're not used for comparison
     if result.llm_routes:
         best_llm = result.llm_routes[0]
+        llm_raw_clip = getattr(best_llm, 'clip_score_absolute', None)
+        if llm_raw_clip is None:
+            llm_raw_clip = best_llm.clip_score  # Fallback if absolute not available
         lines.append("\n🚀 Best LLM Route:")
-        lines.append(f"  Overall Score:        {best_llm.overall_score:.3f}")
-        lines.append(f"    - CLIP:             {best_llm.clip_score:.3f}")
-        lines.append(f"    - Efficiency:       {best_llm.efficiency_score:.3f}")
-        lines.append(f"    - Preference Match: {best_llm.preference_match_score:.3f}")
-        lines.append(f"    - Images Used:      {best_llm.num_images}")
+        lines.append(f"  Overall Score (comparison): {result.llm_route_score:.3f}")
+        lines.append(f"    - Raw CLIP Score:         {llm_raw_clip:.3f}")
+        lines.append(f"    - Efficiency Score:       {best_llm.efficiency_score:.3f}")
+        lines.append(f"    - Images Used:            {best_llm.num_images}")
     
     if result.ground_truth_routes:
         best_gt = result.ground_truth_routes[0]
+        gt_raw_clip = getattr(best_gt, 'clip_score_absolute', None)
+        if gt_raw_clip is None:
+            gt_raw_clip = best_gt.clip_score  # Fallback if absolute not available
         lines.append("\n🎯 Best Ground Truth Route:")
-        lines.append(f"  Overall Score:        {best_gt.overall_score:.3f}")
-        lines.append(f"    - CLIP:             {best_gt.clip_score:.3f}")
-        lines.append(f"    - Efficiency:       {best_gt.efficiency_score:.3f}")
-        lines.append(f"    - Preference Match: {best_gt.preference_match_score:.3f}")
-        lines.append(f"    - Images Used:      {best_gt.num_images}")
+        lines.append(f"  Overall Score (comparison): {result.ground_truth_route_score:.3f}")
+        lines.append(f"    - Raw CLIP Score:         {gt_raw_clip:.3f}")
+        lines.append(f"    - Efficiency Score:       {best_gt.efficiency_score:.3f}")
+        lines.append(f"    - Images Used:            {best_gt.num_images}")
     
     # Waypoint comparison (informational - just show what was found)
     if result.llm_routes and result.ground_truth_routes:

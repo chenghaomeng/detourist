@@ -45,12 +45,13 @@ class ScoringWeights:
 class RouteScore:
     """Score breakdown for a route."""
     route: Route
-    clip_score: float
+    clip_score: float  # Normalized CLIP score (relative or absolute depending on mode)
     efficiency_score: float
     preference_match_score: float
     overall_score: float
     image_scores: List[float]
     num_images: int
+    clip_score_absolute: Optional[float] = None  # Absolute CLIP score (0-100) for fair comparison
 
 
 # ------------------------- Scorer -------------------------
@@ -98,6 +99,30 @@ class RouteScorer:
         self._http.headers.update({"User-Agent": "berkeley-detourist/1.0 (berkeley.edu)"})
 
     # ------------------------- Public API -------------------------
+
+    def recompute_overall_score(
+        self,
+        clip_score: float,
+        efficiency_score: float,
+        preference_score: float = 0.0,
+        evaluation_mode: bool = False,
+    ) -> float:
+        """
+        Recompute overall score given individual component scores.
+        
+        This is useful for evaluation scenarios where you want to recompute
+        overall scores with modified CLIP scores (e.g., normalized across batches).
+        
+        Args:
+            clip_score: Normalized CLIP score (0-100)
+            efficiency_score: Efficiency score (0-100)
+            preference_score: Preference match score (0-100). Defaults to 0.0.
+            evaluation_mode: If True, excludes preference_score from calculation.
+            
+        Returns:
+            Overall score (0-100)
+        """
+        return self._combine_scores(clip_score, efficiency_score, preference_score, evaluation_mode)
 
     def score_routes(
         self,
@@ -170,22 +195,30 @@ class RouteScorer:
             max_clip_score = max(max_clip_score, clip_score)
 
         # Pass 2: normalize and combine
+        # Always use relative normalization for overall_score (to match production ranking behavior)
+        # But also store absolute CLIP scores for fair comparison in evaluations
         for i, route in enumerate(routes):
             clip_score_raw, image_scores = route_clip_scores[i]
-            normalized_clip = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
+            # Relative normalization for ranking (matches production behavior)
+            normalized_clip_relative = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
+            # Absolute normalization for fair comparison across batches
+            normalized_clip_absolute = clip_score_raw * 100.0
+            
             efficiency_score = self._calculate_efficiency_score(route, min_duration)
             preference_score = self._calculate_preference_match_score(route)
-            overall = self._combine_scores(normalized_clip, efficiency_score, preference_score, evaluation_mode)
+            # Use relative CLIP score for overall_score calculation (for correct ranking)
+            overall = self._combine_scores(normalized_clip_relative, efficiency_score, preference_score, evaluation_mode)
 
             scored_routes.append(
                 RouteScore(
                     route=route,
-                    clip_score=float(normalized_clip),
+                    clip_score=float(normalized_clip_relative),  # Relative for display/ranking
                     efficiency_score=float(efficiency_score),
                     preference_match_score=float(preference_score),
                     overall_score=float(overall),
                     image_scores=[float(s) for s in image_scores],
                     num_images=len(image_scores),
+                    clip_score_absolute=float(normalized_clip_absolute),  # Absolute for comparison
                 )
             )
 
