@@ -104,7 +104,7 @@ def format_result_summary(result: EvaluationResult) -> str:
     
     if result.score_comparison is not None:
         status = "✅ PASS" if result.score_comparison else "❌ FAIL"
-        lines.append(f"  LLM >= Ground Truth:   {status}")
+        lines.append(f"  LLM Parity with GT:     {status}")
         if result.llm_route_score and result.ground_truth_route_score:
             diff = result.llm_route_score - result.ground_truth_route_score
             lines.append(f"  Score Difference:      {diff:+.3f}")
@@ -195,8 +195,8 @@ Extraction Accuracy:
     if score_comparisons:
         score_stats = f"""
 Route Score Comparison:
-  LLM >= Ground Truth: {score_wins}/{len(score_comparisons)} ({score_wins/len(score_comparisons)*100:.1f}%)
-  LLM < Ground Truth:  {score_losses}/{len(score_comparisons)} ({score_losses/len(score_comparisons)*100:.1f}%)
+  LLM Parity with Ground Truth: {score_wins}/{len(score_comparisons)} ({score_wins/len(score_comparisons)*100:.1f}%)
+  LLM Worse than Ground Truth:  {score_losses}/{len(score_comparisons)} ({score_losses/len(score_comparisons)*100:.1f}%)
 """
     
     # Average processing time

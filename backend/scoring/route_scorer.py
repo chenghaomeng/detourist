@@ -106,6 +106,7 @@ class RouteScorer:
         min_images_per_route: Optional[int] = None,
         max_images_per_route: Optional[int] = None,
         debug: bool = False,
+        evaluation_mode: bool = False,
     ) -> List[RouteScore]:
         """
         Score routes and return ranked results.
@@ -174,7 +175,7 @@ class RouteScorer:
             normalized_clip = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
             efficiency_score = self._calculate_efficiency_score(route, min_duration)
             preference_score = self._calculate_preference_match_score(route)
-            overall = self._combine_scores(normalized_clip, efficiency_score, preference_score)
+            overall = self._combine_scores(normalized_clip, efficiency_score, preference_score, evaluation_mode)
 
             scored_routes.append(
                 RouteScore(
@@ -334,12 +335,43 @@ class RouteScorer:
         bonus = 1.0 + self.waypoint_bonus_rate * (len(route.waypoints) - 1)
         return float(min(100.0, avg_rel * bonus))
 
-    def _combine_scores(self, clip_score: float, efficiency_score: float, preference_score: float) -> float:
-        return (
-            self.weights.clip_weight * clip_score
-            + self.weights.duration_weight * efficiency_score
-            + self.weights.waypoint_relevance_weight * preference_score
-        )
+    def _combine_scores(
+        self, 
+        clip_score: float, 
+        efficiency_score: float, 
+        preference_score: float,
+        evaluation_mode: bool = False
+    ) -> float:
+        """
+        Combine scores into overall score.
+        
+        In evaluation_mode, preference_score is excluded from overall score calculation
+        because waypoints are provided directly (not searched), making preference_match
+        scores meaningless (they're based on hardcoded values, not actual preference matching).
+        
+        In regular mode, all three components are included.
+        """
+        if evaluation_mode:
+            # Normalize weights to exclude preference_match
+            total_weight = self.weights.clip_weight + self.weights.duration_weight
+            if total_weight > 0:
+                clip_weight = self.weights.clip_weight / total_weight
+                duration_weight = self.weights.duration_weight / total_weight
+            else:
+                clip_weight = 0.5
+                duration_weight = 0.5
+            
+            return (
+                clip_weight * clip_score
+                + duration_weight * efficiency_score
+            )
+        else:
+            # Regular mode: include all three components
+            return (
+                self.weights.clip_weight * clip_score
+                + self.weights.duration_weight * efficiency_score
+                + self.weights.waypoint_relevance_weight * preference_score
+            )
 
     # ------------------------- Sampling helpers -------------------------
 

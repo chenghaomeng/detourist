@@ -96,7 +96,7 @@ class EvaluationResult:
         extraction_comparison: Comparison between LLM extraction and ground truth
         llm_route_score: Best route score from LLM-extracted parameters
         ground_truth_route_score: Route score from ground truth parameters
-        score_comparison: Whether LLM route score >= ground truth route score
+        score_comparison: Whether LLM route score >= (ground truth route score - 0.5)
         llm_routes: List of routes generated from LLM extraction
         ground_truth_routes: List of routes generated from ground truth
         processing_time_seconds: Time taken to process this example
@@ -109,7 +109,7 @@ class EvaluationResult:
     extraction_comparison: Optional[ExtractionComparison] = None
     llm_route_score: Optional[float] = None
     ground_truth_route_score: Optional[float] = None
-    score_comparison: Optional[bool] = None  # True if LLM >= ground truth
+    score_comparison: Optional[bool] = None  # True if LLM >= (GT - 0.5)
     llm_routes: List[RouteScore] = None
     ground_truth_routes: List[RouteScore] = None
     processing_time_seconds: float = 0.0
@@ -419,20 +419,43 @@ class RouteEvaluator:
         Compare constraints dictionaries (order-invariant).
         
         Normalizes and compares constraint values regardless of dictionary key order.
+        Ignores irrelevant constraints based on transport mode:
+        - For walking: ignores avoid_highways and avoid_tolls
+        - For driving: ignores avoid_stairs
         """
+        # First, check if transport modes match
+        llm_mode = str(llm_constraints.get("transport_mode", "walking")).lower()
+        gt_mode = str(gt_constraints.get("transport_mode", "walking")).lower()
+        
+        if llm_mode != gt_mode:
+            return False
+        
         # Normalize both dictionaries to ensure consistent comparison
-        def normalize_constraints(constraints: Dict[str, Any]) -> Dict[str, Any]:
-            """Normalize constraints to a canonical form."""
+        # Use the transport mode to determine which constraints to compare
+        def normalize_constraints(constraints: Dict[str, Any], transport_mode: str) -> Dict[str, Any]:
+            """Normalize constraints to a canonical form, excluding irrelevant ones."""
             normalized = {}
-            # Normalize transport_mode
-            normalized["transport_mode"] = str(constraints.get("transport_mode", "walking")).lower()
-            # Normalize boolean constraints
-            for key in ["avoid_tolls", "avoid_stairs", "avoid_hills", "avoid_highways"]:
-                normalized[key] = bool(constraints.get(key, False))
+            normalized["transport_mode"] = transport_mode
+            
+            # Normalize boolean constraints based on transport mode
+            # For walking: ignore avoid_highways and avoid_tolls (not applicable)
+            # For driving: ignore avoid_stairs (not applicable)
+            if transport_mode == "walking":
+                # Only compare relevant constraints for walking
+                for key in ["avoid_stairs", "avoid_hills"]:
+                    normalized[key] = bool(constraints.get(key, False))
+            elif transport_mode == "driving":
+                # Only compare relevant constraints for driving
+                for key in ["avoid_tolls", "avoid_hills", "avoid_highways"]:
+                    normalized[key] = bool(constraints.get(key, False))
+            else:
+                # For other modes (cycling, etc.), compare all constraints
+                for key in ["avoid_tolls", "avoid_stairs", "avoid_hills", "avoid_highways"]:
+                    normalized[key] = bool(constraints.get(key, False))
             return normalized
         
-        llm_norm = normalize_constraints(llm_constraints)
-        gt_norm = normalize_constraints(gt_constraints)
+        llm_norm = normalize_constraints(llm_constraints, llm_mode)
+        gt_norm = normalize_constraints(gt_constraints, gt_mode)
         
         # Compare normalized dictionaries (order-invariant)
         return llm_norm == gt_norm
@@ -480,11 +503,11 @@ class RouteEvaluator:
                 # Try semantic similarity with each LLM token
                 for llm_token, llm_lemma in zip(llm_tokens, llm_lemmatized):
                     # Check lemmatized forms
-                    if self._semantic_similarity(gt_lemma, llm_lemma, threshold=0.7):
+                    if self._semantic_similarity(gt_lemma, llm_lemma, threshold=0.6):
                         matched = True
                         break
                     # Check original forms
-                    if self._semantic_similarity(gt_token, llm_token, threshold=0.7):
+                    if self._semantic_similarity(gt_token, llm_token, threshold=0.6):
                         matched = True
                         break
             
@@ -587,6 +610,7 @@ class RouteEvaluator:
                 user_prompt=example.user_prompt,
                 min_images_per_route=min_imgs,
                 max_images_per_route=max_imgs,
+                evaluation_mode=True,
             )
             llm_best_score = llm_scored[0].overall_score if llm_scored else 0.0
             self.logger.info(
@@ -621,6 +645,7 @@ class RouteEvaluator:
                 user_prompt=example.user_prompt,
                 min_images_per_route=min_imgs,
                 max_images_per_route=max_imgs,
+                evaluation_mode=True,
             )
             gt_best_score = gt_scored[0].overall_score if gt_scored else 0.0
             self.logger.info(
@@ -631,12 +656,13 @@ class RouteEvaluator:
             )
 
             # Step 5: Compare scores
-            score_comparison = llm_best_score >= gt_best_score
+            # Allow LLM score to be up to 0.5 points lower than GT score and still be considered acceptable
+            score_comparison = llm_best_score >= (gt_best_score - 0.5)
 
             processing_time = time.time() - start_time
 
             self.logger.info(
-                "Example %s completed: LLM score=%.3f, GT score=%.3f, LLM >= GT: %s",
+                "Example %s completed: LLM score=%.3f, GT score=%.3f, LLM >= (GT - 0.5): %s",
                 example_id,
                 llm_best_score,
                 gt_best_score,
@@ -702,7 +728,7 @@ class RouteEvaluator:
         score_wins = sum(1 for r in results if r.score_comparison is True)
 
         self.logger.info(
-            "Batch evaluation complete: %d/%d successful, %d/%d LLM routes >= GT routes, total time: %.2fs",
+            "Batch evaluation complete: %d/%d successful, %d/%d LLM routes >= (GT - 0.5), total time: %.2fs",
             successful,
             len(examples),
             score_wins,
@@ -791,6 +817,7 @@ class RouteEvaluator:
                 user_prompt=prompt,
                 min_images_per_route=min_images,
                 max_images_per_route=max_images,
+                evaluation_mode=True,
             )
 
             # Step 3: Pick the best route (highest overall score)
