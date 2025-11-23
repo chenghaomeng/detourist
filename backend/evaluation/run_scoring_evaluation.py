@@ -70,9 +70,13 @@ def format_result_summary(result: ScoringEvaluationResult) -> str:
             
             lines.append(f"  Route {i}:")
             lines.append(f"    Overall Score: {scored_route.overall_score:.3f}{marker}")
-            lines.append(f"    CLIP Score: {scored_route.clip_score:.3f}")
+            # Get raw CLIP score (absolute) for transparency
+            raw_clip = getattr(scored_route, 'clip_score_absolute', None)
+            if raw_clip is None:
+                raw_clip = scored_route.clip_score  # Fallback if absolute not available
+            lines.append(f"    Raw CLIP Score: {raw_clip:.3f}")
             lines.append(f"    Efficiency Score: {scored_route.efficiency_score:.3f}")
-            lines.append(f"    Preference Match Score: {scored_route.preference_match_score:.3f}")
+            # Preference scores are not shown - they're excluded from overall score calculation
             lines.append(f"    Waypoints: {len(route.waypoints)}")
             lines.append(f"    Distance: {route.total_distance_meters:.0f}m")
             lines.append(f"    Duration: {route.total_duration_seconds}s")
@@ -198,9 +202,9 @@ def main():
                 "scored_routes": [
                     {
                         "overall_score": sr.overall_score,
-                        "clip_score": sr.clip_score,
+                        "clip_score": getattr(sr, 'clip_score_absolute', sr.clip_score),  # Use absolute if available
                         "efficiency_score": sr.efficiency_score,
-                        "preference_match_score": sr.preference_match_score,
+                        # Preference scores excluded - not used in evaluation_mode
                         "num_waypoints": len(sr.route.waypoints),
                         "distance_meters": sr.route.total_distance_meters,
                         "duration_seconds": sr.route.total_duration_seconds,

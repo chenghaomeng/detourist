@@ -11,6 +11,7 @@ import logging
 import os
 import time
 import re
+import math
 import numpy as np
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet as wn
@@ -86,6 +87,25 @@ class ExtractionComparison:
 
 
 @dataclass
+class CoordinateProximityComparison:
+    """
+    Comparison of coordinate proximity between app route and ground truth route.
+    
+    Attributes:
+        origin_within_radius: Whether app route origin is within the proximity radius of GT origin
+        destination_within_radius: Whether app route destination is within the proximity radius of GT destination
+        origin_distance_miles: Distance in miles between origins
+        destination_distance_miles: Distance in miles between destinations
+        radius_miles: The radius threshold used for comparison (for display purposes)
+    """
+    origin_within_radius: bool
+    destination_within_radius: bool
+    origin_distance_miles: float
+    destination_distance_miles: float
+    radius_miles: float
+
+
+@dataclass
 class EvaluationResult:
     """
     Result of evaluating a single ground truth example.
@@ -97,6 +117,7 @@ class EvaluationResult:
         llm_route_score: Best route score from LLM-extracted parameters
         ground_truth_route_score: Route score from ground truth parameters
         score_comparison: Whether LLM route score >= (ground truth route score - 0.5)
+        coordinate_proximity: Comparison of origin/destination coordinate proximity
         llm_routes: List of routes generated from LLM extraction
         ground_truth_routes: List of routes generated from ground truth
         processing_time_seconds: Time taken to process this example
@@ -110,6 +131,7 @@ class EvaluationResult:
     llm_route_score: Optional[float] = None
     ground_truth_route_score: Optional[float] = None
     score_comparison: Optional[bool] = None  # True if LLM >= (GT - 0.5)
+    coordinate_proximity: Optional[CoordinateProximityComparison] = None
     llm_routes: List[RouteScore] = None
     ground_truth_routes: List[RouteScore] = None
     processing_time_seconds: float = 0.0
@@ -200,6 +222,9 @@ class RouteEvaluator:
     4. Builds and scores routes using ground truth parameters
     5. Compares the two scores to see if the app route is equal or better
     """
+    
+    # Coordinate proximity threshold (configurable)
+    COORDINATE_PROXIMITY_RADIUS_MILES = 3.0
 
     def __init__(
         self,
@@ -238,6 +263,38 @@ class RouteEvaluator:
         # Initialize embedding model for semantic similarity (lazy load)
         self.embedding_model_name = embedding_model_name
         self._embedding_model = None
+    
+    @staticmethod
+    def _haversine_distance_miles(coord1: Coordinates, coord2: Coordinates) -> float:
+        """
+        Calculate the great circle distance between two coordinates in miles using the Haversine formula.
+        
+        Args:
+            coord1: First coordinate
+            coord2: Second coordinate
+            
+        Returns:
+            Distance in miles
+        """
+        
+        # Earth's radius in miles
+        R = 3958.8
+        
+        # Convert latitude and longitude from degrees to radians
+        lat1_rad = math.radians(coord1.latitude)
+        lat2_rad = math.radians(coord2.latitude)
+        lon1_rad = math.radians(coord1.longitude)
+        lon2_rad = math.radians(coord2.longitude)
+        
+        # Haversine formula
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+        
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+        c = 2 * math.asin(math.sqrt(a))
+        
+        distance_miles = R * c
+        return distance_miles
 
     def _get_embedding_model(self):
         """Lazy load embedding model for semantic similarity."""
@@ -732,6 +789,44 @@ class RouteEvaluator:
             # Allow LLM score to be up to 0.5 points lower than GT score and still be considered acceptable
             score_comparison = llm_best_comparison_overall >= (gt_best_comparison_overall - 0.5)
 
+            # Step 6: Compare coordinate proximity
+            coordinate_proximity = None
+            if llm_best and gt_best:
+                llm_route = llm_best.route
+                gt_route = gt_best.route
+                
+                # Calculate distances
+                origin_distance_miles = self._haversine_distance_miles(
+                    llm_route.origin,
+                    gt_route.origin
+                )
+                destination_distance_miles = self._haversine_distance_miles(
+                    llm_route.destination,
+                    gt_route.destination
+                )
+                
+                # Check if within radius
+                radius_miles = self.COORDINATE_PROXIMITY_RADIUS_MILES
+                origin_within_radius = origin_distance_miles <= radius_miles
+                destination_within_radius = destination_distance_miles <= radius_miles
+                
+                coordinate_proximity = CoordinateProximityComparison(
+                    origin_within_radius=origin_within_radius,
+                    destination_within_radius=destination_within_radius,
+                    origin_distance_miles=origin_distance_miles,
+                    destination_distance_miles=destination_distance_miles,
+                    radius_miles=radius_miles,
+                )
+                
+                self.logger.info(
+                    "Coordinate proximity (radius=%.1f miles): origin=%.2f miles (%s), destination=%.2f miles (%s)",
+                    radius_miles,
+                    origin_distance_miles,
+                    "✅" if origin_within_radius else "❌",
+                    destination_distance_miles,
+                    "✅" if destination_within_radius else "❌",
+                )
+
             processing_time = time.time() - start_time
 
             self.logger.info(
@@ -751,6 +846,7 @@ class RouteEvaluator:
                 llm_route_score=llm_best_comparison_overall,  # Use normalized comparison score
                 ground_truth_route_score=gt_best_comparison_overall,  # Use normalized comparison score
                 score_comparison=score_comparison,
+                coordinate_proximity=coordinate_proximity,
                 llm_routes=llm_scored,
                 ground_truth_routes=gt_scored,
                 processing_time_seconds=processing_time,
@@ -881,7 +977,8 @@ class RouteEvaluator:
                 routes.append(route)
 
             # Step 2: Score all routes
-            self.logger.info("Step 2: Scoring all routes")
+            # Use evaluation_mode=True to exclude preference scores (fair evaluation)
+            self.logger.info("Step 2: Scoring all routes (evaluation mode - preference scores excluded)")
             # Determine image limits based on ENABLE_SCORING
             enable_scoring = os.getenv("ENABLE_SCORING", "false").lower() == "true"
             min_images = 3 if enable_scoring else 0
@@ -892,7 +989,7 @@ class RouteEvaluator:
                 user_prompt=prompt,
                 min_images_per_route=min_images,
                 max_images_per_route=max_images,
-                evaluation_mode=True,
+                evaluation_mode=True,  # Exclude preference scores from overall score
             )
 
             # Step 3: Pick the best route (highest overall score)

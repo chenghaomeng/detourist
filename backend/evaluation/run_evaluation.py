@@ -109,6 +109,15 @@ def format_result_summary(result: EvaluationResult) -> str:
             diff = result.llm_route_score - result.ground_truth_route_score
             lines.append(f"  Score Difference:      {diff:+.3f}")
     
+    # Coordinate proximity comparison
+    if result.coordinate_proximity:
+        comp = result.coordinate_proximity
+        lines.append(f"\n📍 Coordinate Proximity (radius: {comp.radius_miles:.1f} miles):")
+        origin_status = "✅ PASS" if comp.origin_within_radius else "❌ FAIL"
+        dest_status = "✅ PASS" if comp.destination_within_radius else "❌ FAIL"
+        lines.append(f"  {origin_status} Origin: {comp.origin_distance_miles:.2f} miles")
+        lines.append(f"  {dest_status} Destination: {comp.destination_distance_miles:.2f} miles")
+    
     # Best route details
     # Show comparison scores (re-normalized) and raw CLIP scores
     # Preference scores are NOT shown since they're not used for comparison
@@ -205,6 +214,23 @@ Route Score Comparison:
   LLM Worse than Ground Truth:  {score_losses}/{len(score_comparisons)} ({score_losses/len(score_comparisons)*100:.1f}%)
 """
     
+    # Coordinate proximity stats
+    coord_proximities = [r.coordinate_proximity for r in results if r.coordinate_proximity is not None]
+    origin_passes = sum(1 for c in coord_proximities if c.origin_within_radius)
+    dest_passes = sum(1 for c in coord_proximities if c.destination_within_radius)
+    both_pass = sum(1 for c in coord_proximities if c.origin_within_radius and c.destination_within_radius)
+    
+    coord_stats = ""
+    if coord_proximities:
+        # Get radius from first example (all should have same radius)
+        radius = coord_proximities[0].radius_miles if coord_proximities else 2.0
+        coord_stats = f"""
+Coordinate Proximity:
+  Origin:       {origin_passes}/{len(coord_proximities)} ({origin_passes/len(coord_proximities)*100:.1f}%)
+  Destination:  {dest_passes}/{len(coord_proximities)} ({dest_passes/len(coord_proximities)*100:.1f}%)
+  Both:         {both_pass}/{len(coord_proximities)} ({both_pass/len(coord_proximities)*100:.1f}%)
+"""
+    
     # Average processing time
     avg_time = sum(r.processing_time_seconds for r in results) / total if total > 0 else 0.0
     
@@ -216,7 +242,7 @@ Total Examples:        {total}
 Successful:            {successful} ✅
 Failed:                {failed} ❌
 Average Processing:    {avg_time:.2f}s per example
-{extraction_stats}{score_stats}
+{extraction_stats}{score_stats}{coord_stats}
 """
 
 
@@ -255,6 +281,15 @@ def export_results_json(results: List[EvaluationResult], output_path: Path):
         data["llm_route_score"] = result.llm_route_score
         data["ground_truth_route_score"] = result.ground_truth_route_score
         data["score_comparison"] = result.score_comparison
+        
+        if result.coordinate_proximity:
+            data["coordinate_proximity"] = {
+                "origin_within_radius": result.coordinate_proximity.origin_within_radius,
+                "destination_within_radius": result.coordinate_proximity.destination_within_radius,
+                "origin_distance_miles": result.coordinate_proximity.origin_distance_miles,
+                "destination_distance_miles": result.coordinate_proximity.destination_distance_miles,
+                "radius_miles": result.coordinate_proximity.radius_miles,
+            }
         
         if result.llm_routes:
             data["llm_routes"] = [
