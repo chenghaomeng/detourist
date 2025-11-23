@@ -112,7 +112,7 @@ def format_result_summary(result: EvaluationResult) -> str:
     # Coordinate proximity comparison
     if result.coordinate_proximity:
         comp = result.coordinate_proximity
-        lines.append(f"\n📍 Coordinate Proximity (radius: {comp.radius_miles:.1f} miles):")
+        lines.append(f"\n📍 Coordinate Proximity:")
         origin_status = "✅ PASS" if comp.origin_within_radius else "❌ FAIL"
         dest_status = "✅ PASS" if comp.destination_within_radius else "❌ FAIL"
         lines.append(f"  {origin_status} Origin: {comp.origin_distance_miles:.2f} miles")
