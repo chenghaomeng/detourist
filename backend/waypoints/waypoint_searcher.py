@@ -213,7 +213,7 @@ class WaypointSearcher:
             pt = self._element_point(e)
             if pt is None:
                 continue
-            name = tags.get("name") or tags.get("alt_name") or self._synthetic_name(e, query)
+            name = self._get_best_name(tags, e, query)
             out.append(
                 Waypoint(
                     name=name,
@@ -324,10 +324,112 @@ class WaypointSearcher:
         overlap = len(name_tokens & query_tokens)
         return min(1.0, overlap / max(1, len(query_tokens)))
 
-    def _synthetic_name(self, element: Dict[str, Any], query: str) -> str:
-        osm_type = element.get("type", "elem")
+    def _get_best_name(self, tags: Dict[str, Any], element: Dict[str, Any], query: str) -> str:
+        """Get the best available name for a waypoint using multiple fallback strategies."""
+        
+        # Strategy 1: Direct name fields
+        for name_field in ["name", "alt_name", "official_name", "short_name"]:
+            if name_field in tags and tags[name_field]:
+                return tags[name_field]
+        
+        # Strategy 2: Brand/operator names
+        for brand_field in ["brand", "operator", "network"]:
+            if brand_field in tags and tags[brand_field]:
+                return tags[brand_field]
+        
+        # Strategy 3: Reference numbers (often meaningful)
+        if "ref" in tags and tags["ref"]:
+            return f"{self._get_category_display_name(tags, query)} {tags['ref']}"
+        
+        # Strategy 4: Location-based names
+        location_parts = []
+        for loc_field in ["addr:street", "addr:housenumber", "addr:city"]:
+            if loc_field in tags and tags[loc_field]:
+                location_parts.append(tags[loc_field])
+        
+        if location_parts:
+            category_name = self._get_category_display_name(tags, query)
+            return f"{category_name} on {', '.join(location_parts)}"
+        
+        # Strategy 5: Enhanced synthetic name
+        return self._enhanced_synthetic_name(tags, element, query)
+    
+    def _get_category_display_name(self, tags: Dict[str, Any], query: str) -> str:
+        """Convert OSM tags to user-friendly category names."""
+        # Check for specific categories first
+        if "leisure" in tags:
+            leisure_type = tags["leisure"]
+            if leisure_type == "park":
+                return "Park"
+            elif leisure_type == "playground":
+                return "Playground"
+            elif leisure_type == "garden":
+                return "Garden"
+            elif leisure_type == "sports_centre":
+                return "Sports Center"
+            else:
+                return leisure_type.replace("_", " ").title()
+        
+        if "tourism" in tags:
+            tourism_type = tags["tourism"]
+            if tourism_type == "attraction":
+                return "Attraction"
+            elif tourism_type == "museum":
+                return "Museum"
+            elif tourism_type == "viewpoint":
+                return "Viewpoint"
+            elif tourism_type == "information":
+                return "Information Center"
+            else:
+                return tourism_type.replace("_", " ").title()
+        
+        if "amenity" in tags:
+            amenity_type = tags["amenity"]
+            if amenity_type == "cafe":
+                return "Cafe"
+            elif amenity_type == "restaurant":
+                return "Restaurant"
+            elif amenity_type == "school":
+                return "School"
+            elif amenity_type == "hospital":
+                return "Hospital"
+            else:
+                return amenity_type.replace("_", " ").title()
+        
+        if "natural" in tags:
+            natural_type = tags["natural"]
+            if natural_type == "beach":
+                return "Beach"
+            elif natural_type == "water":
+                return "Water Feature"
+            else:
+                return natural_type.replace("_", " ").title()
+        
+        # Fallback to query-based name
+        if "=" in query:
+            key, value = query.split("=", 1)
+            return value.replace("_", " ").title()
+        
+        return "Point of Interest"
+    
+    def _enhanced_synthetic_name(self, tags: Dict[str, Any], element: Dict[str, Any], query: str) -> str:
+        """Create a more descriptive synthetic name."""
+        category_name = self._get_category_display_name(tags, query)
+        osm_type = element.get("type", "element")
         osm_id = element.get("id", "unknown")
-        return f"{query} ({osm_type} {osm_id})"
+        
+        # Try to make it more specific based on tags
+        if "addr:street" in tags:
+            return f"{category_name} on {tags['addr:street']}"
+        elif "addr:city" in tags:
+            return f"{category_name} in {tags['addr:city']}"
+        else:
+            return f"{category_name} ({osm_type} {osm_id})"
+    
+    def _synthetic_name(self, element: Dict[str, Any], query: str) -> str:
+        """Legacy method - now redirects to enhanced version."""
+        tags = element.get("tags", {}) or {}
+        return self._enhanced_synthetic_name(tags, element, query)
 
 
 # Helper

@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ScoringWeights:
     """Weights for different scoring components."""
-    clip_weight: float = 0.4
-    duration_weight: float = 0.3
+    clip_weight: float = 0.2
+    duration_weight: float = 0.5
     waypoint_relevance_weight: float = 0.3
 
 
@@ -45,12 +45,13 @@ class ScoringWeights:
 class RouteScore:
     """Score breakdown for a route."""
     route: Route
-    clip_score: float
+    clip_score: float  # Normalized CLIP score (relative or absolute depending on mode)
     efficiency_score: float
     preference_match_score: float
     overall_score: float
     image_scores: List[float]
     num_images: int
+    clip_score_absolute: Optional[float] = None  # Absolute CLIP score (0-100) for fair comparison
 
 
 # ------------------------- Scorer -------------------------
@@ -75,6 +76,7 @@ class RouteScorer:
         self.weights = weights or ScoringWeights()
         self.mapillary_token = mapillary_token or os.getenv("MAPILLARY_TOKEN")
         self.waypoint_bonus_rate = waypoint_bonus_rate
+        self.logger = logging.getLogger(__name__)
 
         # Toggle CLIP/Image scoring with env
         self.enable_scoring = os.getenv("ENABLE_SCORING", "false").lower() == "true"
@@ -98,6 +100,30 @@ class RouteScorer:
 
     # ------------------------- Public API -------------------------
 
+    def recompute_overall_score(
+        self,
+        clip_score: float,
+        efficiency_score: float,
+        preference_score: float = 0.0,
+        evaluation_mode: bool = False,
+    ) -> float:
+        """
+        Recompute overall score given individual component scores.
+        
+        This is useful for evaluation scenarios where you want to recompute
+        overall scores with modified CLIP scores (e.g., normalized across batches).
+        
+        Args:
+            clip_score: Normalized CLIP score (0-100)
+            efficiency_score: Efficiency score (0-100)
+            preference_score: Preference match score (0-100). Defaults to 0.0.
+            evaluation_mode: If True, excludes preference_score from calculation.
+            
+        Returns:
+            Overall score (0-100)
+        """
+        return self._combine_scores(clip_score, efficiency_score, preference_score, evaluation_mode)
+
     def score_routes(
         self,
         routes: List[Route],
@@ -105,6 +131,7 @@ class RouteScorer:
         min_images_per_route: Optional[int] = None,
         max_images_per_route: Optional[int] = None,
         debug: bool = False,
+        evaluation_mode: bool = False,
     ) -> List[RouteScore]:
         """
         Score routes and return ranked results.
@@ -137,34 +164,61 @@ class RouteScorer:
                     max_images=max_images_per_route,
                     debug=debug,
                 )
+                if debug:
+                    logger.debug(f"[scoring] Route {i+1}: fetched {len(images)} images")
+            else:
+                if debug:
+                    if not self.enable_scoring:
+                        logger.debug(f"[scoring] Route {i+1}: CLIP disabled (ENABLE_SCORING=false)")
+                    elif not self.mapillary_token:
+                        logger.debug(f"[scoring] Route {i+1}: No Mapillary token")
+                    elif max_images_per_route == 0:
+                        logger.debug(f"[scoring] Route {i+1}: max_images_per_route=0")
 
             if images:
                 image_scores = self._compute_clip_scores(images, user_prompt)
                 clip_score = float(np.mean(image_scores)) if image_scores else 0.0
+                if debug:
+                    logger.debug(
+                        "[scoring] Route %d: CLIP score=%.3f (from %d images)",
+                        i + 1,
+                        clip_score,
+                        len(image_scores),
+                    )
             else:
                 image_scores = []
                 clip_score = 0.0
+                if debug:
+                    logger.debug(f"[scoring] Route {i+1}: CLIP score=0.0 (no images)")
 
             route_clip_scores.append((clip_score, image_scores))
             max_clip_score = max(max_clip_score, clip_score)
 
         # Pass 2: normalize and combine
+        # Always use relative normalization for overall_score (to match production ranking behavior)
+        # But also store absolute CLIP scores for fair comparison in evaluations
         for i, route in enumerate(routes):
             clip_score_raw, image_scores = route_clip_scores[i]
-            normalized_clip = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
+            # Relative normalization for ranking (matches production behavior)
+            normalized_clip_relative = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
+            # Absolute normalization for fair comparison across batches
+            normalized_clip_absolute = clip_score_raw * 100.0
+            
             efficiency_score = self._calculate_efficiency_score(route, min_duration)
             preference_score = self._calculate_preference_match_score(route)
-            overall = self._combine_scores(normalized_clip, efficiency_score, preference_score)
+            # Use relative CLIP score for overall_score calculation (for correct ranking)
+            overall = self._combine_scores(normalized_clip_relative, efficiency_score, preference_score, evaluation_mode)
 
             scored_routes.append(
                 RouteScore(
                     route=route,
-                    clip_score=float(normalized_clip),
+                    clip_score=float(normalized_clip_relative),  # Relative for display/ranking
                     efficiency_score=float(efficiency_score),
                     preference_match_score=float(preference_score),
                     overall_score=float(overall),
                     image_scores=[float(s) for s in image_scores],
                     num_images=len(image_scores),
+                    clip_score_absolute=float(normalized_clip_absolute),  # Absolute for comparison
                 )
             )
 
@@ -309,23 +363,48 @@ class RouteScorer:
 
     def _calculate_preference_match_score(self, route: Route) -> float:
         if not route.waypoints:
-            return -1.0
+            return 0
         avg_rel = float(np.mean([w.relevance_score for w in route.waypoints]))
         bonus = 1.0 + self.waypoint_bonus_rate * (len(route.waypoints) - 1)
         return float(min(100.0, avg_rel * bonus))
 
-    def _combine_scores(self, clip_score: float, efficiency_score: float, preference_score: float) -> float:
-        if preference_score < 0:
-            w = self.weights
-            tot = w.clip_weight + w.duration_weight
-            cw = w.clip_weight / tot if tot > 0 else 0.5
-            dw = w.duration_weight / tot if tot > 0 else 0.5
-            return cw * clip_score + dw * efficiency_score
-        return (
-            self.weights.clip_weight * clip_score
-            + self.weights.duration_weight * efficiency_score
-            + self.weights.waypoint_relevance_weight * preference_score
-        )
+    def _combine_scores(
+        self, 
+        clip_score: float, 
+        efficiency_score: float, 
+        preference_score: float,
+        evaluation_mode: bool = False
+    ) -> float:
+        """
+        Combine scores into overall score.
+        
+        In evaluation_mode, preference_score is excluded from overall score calculation
+        because waypoints are provided directly (not searched), making preference_match
+        scores meaningless (they're based on hardcoded values, not actual preference matching).
+        
+        In regular mode, all three components are included.
+        """
+        if evaluation_mode:
+            # Normalize weights to exclude preference_match
+            total_weight = self.weights.clip_weight + self.weights.duration_weight
+            if total_weight > 0:
+                clip_weight = self.weights.clip_weight / total_weight
+                duration_weight = self.weights.duration_weight / total_weight
+            else:
+                clip_weight = 0.5
+                duration_weight = 0.5
+            
+            return (
+                clip_weight * clip_score
+                + duration_weight * efficiency_score
+            )
+        else:
+            # Regular mode: include all three components
+            return (
+                self.weights.clip_weight * clip_score
+                + self.weights.duration_weight * efficiency_score
+                + self.weights.waypoint_relevance_weight * preference_score
+            )
 
     # ------------------------- Sampling helpers -------------------------
 

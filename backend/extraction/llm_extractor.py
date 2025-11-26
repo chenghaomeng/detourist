@@ -14,7 +14,6 @@ from typing import Dict, List
 from dataclasses import dataclass
 import json
 import logging
-import os
 
 from .llm_providers import LLMProviderManager
 from .prompts import create_extraction_prompt_with_candidates, PREFERENCE_EXTRACTION_PROMPT
@@ -28,6 +27,7 @@ class ExtractedParameters:
     time_flexibility_minutes: int
     waypoint_queries: List[str]
     constraints: Dict[str, object]
+    preferences: str  # Simplified, comma-separated preferences string
 
 
 class LLMExtractor:
@@ -37,19 +37,8 @@ class LLMExtractor:
         self.osm_validator = OSMTagValidator(include_descriptions_in_faiss_index=True)
         self.logger = logging.getLogger(__name__)
 
-        # NEW: env-driven knobs (defaults keep previous behavior close)
-        self._wq_num_tags = int(os.getenv("WQ_NUM_TAGS", "6"))        # how many tags LLM should pick
-        self._wq_max_return = int(os.getenv("WQ_MAX_RETURN", "12"))   # hard cap on final waypoint_queries
-
-    def extract_parameters(self, user_prompt: str, num_tags: int = None) -> ExtractedParameters:
-        """
-        Extract structured parameters from the user prompt.
-        num_tags: optional override; if None, uses env WQ_NUM_TAGS.
-        """
+    def extract_parameters(self, user_prompt: str, num_tags: int = 5) -> ExtractedParameters:
         try:
-            if num_tags is None:
-                num_tags = self._wq_num_tags
-
             # 1) Preference concepts (plain text, comma separated)
             pref_prompt = PREFERENCE_EXTRACTION_PROMPT.format(user_prompt=user_prompt)
             preferences = self.provider_manager.extract_parameters(pref_prompt, expect_json=False).strip()
@@ -57,24 +46,17 @@ class LLMExtractor:
                 raise Exception("LLM returned empty preferences")
 
             # 2) FAISS lookup for candidate OSM tags based on those concepts
-            candidate_tags = self.osm_validator.get_candidate_tags(
-                preferences,
-                top_k=max(10, num_tags * 4)  # unchanged heuristic, just uses num_tags
-            )
+            candidate_tags = self.osm_validator.get_candidate_tags(preferences, top_k=max(10, num_tags * 4))
             candidate_tag_strings = [f"{t.key}={t.value}" for t in candidate_tags]
 
             # 3) Strict JSON extraction using the hard candidate list
-            extraction_prompt = create_extraction_prompt_with_candidates(
-                user_prompt, candidate_tag_strings, num_tags
-            )
+            extraction_prompt = create_extraction_prompt_with_candidates(user_prompt, candidate_tag_strings, num_tags)
             raw = self.provider_manager.extract_parameters(extraction_prompt, expect_json=True)
             data = self._parse_llm_response(raw)
 
-            params = self._create_extracted_parameters(data)
-            self.logger.info(
-                "LLM extractor ok | origin=%s dest=%s tags=%s",
-                params.origin, params.destination, params.waypoint_queries
-            )
+            params = self._create_extracted_parameters(data, preferences)
+            self.logger.info("LLM extractor ok | origin=%s dest=%s tags=%s preferences=%s",
+                             params.origin, params.destination, params.waypoint_queries, params.preferences)
             return params
 
         except Exception as e:
@@ -96,21 +78,14 @@ class LLMExtractor:
             self.logger.error(f"Failed to parse LLM JSON: {e}. Response head: {response[:300]}")
             raise
 
-    def _create_extracted_parameters(self, data: Dict) -> ExtractedParameters:
+    def _create_extracted_parameters(self, data: Dict, preferences: str) -> ExtractedParameters:
         constraints = data.get("constraints", {}) or {}
-        wq_raw = data.get("waypoint_queries", []) or []
-        wq = [q for q in wq_raw if isinstance(q, str) and q.strip()]
-
-        # NEW: replace hard [:10] with env-driven cap
-        cap = max(0, int(self._wq_max_return))
-        if cap > 0:
-            wq = wq[:cap]
-
+        wq = [q for q in data.get("waypoint_queries", []) if isinstance(q, str) and q.strip()]
         return ExtractedParameters(
             origin=data.get("origin", ""),
             destination=data.get("destination", ""),
             time_flexibility_minutes=int(data.get("time_flexibility_minutes", 10)),
-            waypoint_queries=wq,
+            waypoint_queries=wq[:10],
             constraints={
                 "avoid_tolls": bool(constraints.get("avoid_tolls", False)),
                 "avoid_stairs": bool(constraints.get("avoid_stairs", False)),
@@ -118,4 +93,5 @@ class LLMExtractor:
                 "avoid_highways": bool(constraints.get("avoid_highways", False)),
                 "transport_mode": constraints.get("transport_mode", "walking"),
             },
+            preferences=preferences,
         )

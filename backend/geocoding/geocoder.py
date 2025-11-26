@@ -20,9 +20,6 @@ USER_AGENT = "berkeley-detourist/1.0 (berkeley.edu)"
 #   MB_ISO_MAX_MIN=60 (recommended)
 ISO_MAX_MINUTES = int(os.getenv("MB_ISO_MAX_MIN", "60"))
 
-# If the API/orchestrator doesn’t pass transport_mode, we enforce driving here too.
-FORCE_TRANSPORT_MODE = os.getenv("FORCE_TRANSPORT_MODE", "").strip().lower()
-
 @dataclass
 class Coordinates:
     latitude: float
@@ -64,6 +61,7 @@ class Geocoder:
         params = {
             "access_token": self.api_key,
             "limit": 1,
+            "country": "US",  # Bias results to United States
         }
         r = self._session.get(url, params=params, timeout=20)
         r.raise_for_status()
@@ -77,13 +75,12 @@ class Geocoder:
 
     # ---------------- Routing (Mapbox Directions) ----------------
     def _mb_profile(self, transport_mode: str) -> str:
-        # Force if configured
-        mode = (FORCE_TRANSPORT_MODE or transport_mode or "").lower().strip()
+        # Mapbox profiles: driving | walking | cycling
         return {
             "walking": "walking",
             "driving": "driving",
             "cycling": "cycling",
-        }.get(mode, "driving")  # <— default DRIVING
+        }.get(transport_mode, "driving")
 
     def shortest_travel_time_minutes(
         self, origin: Coordinates, destination: Coordinates, transport_mode: str = "driving"
@@ -113,6 +110,7 @@ class Geocoder:
     @staticmethod
     def _cap_minutes(minutes: int) -> int:
         if minutes > ISO_MAX_MINUTES:
+            # visible log to spot when clamping happens
             print(f"[Isochrone] requested {minutes} min > cap {ISO_MAX_MINUTES}; clamping.")
             return ISO_MAX_MINUTES
         if minutes < 0:
@@ -171,9 +169,14 @@ class Geocoder:
         """
         Build the search zone as the UNION of intersections from isochrone-size pairs
         that sum to: shortest_travel_time + max_additional_time.
+        We step in 5-minute increments (or up to 20 even-spaced points if base>60).
+        Each *individual* isochrone call is still capped by _cap_minutes().
         """
         base = self.shortest_travel_time_minutes(origin, destination, transport_mode)
         max_travel_time = base + int(max_additional_time)
+        
+        # Cap at 60 minutes to respect Mapbox isochrone API limits
+        max_travel_time = min(max_travel_time, 60)
 
         if base > 60:
             combos = self._evenly_spaced_minutes(max_travel_time, max_count=20)
