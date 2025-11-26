@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-auth
+  namespace: kube-system
+data:
+  mapRoles: |
+    - rolearn: arn:aws:iam::399966706871:role/eksctl-detourist-eks-nodegroup-ng--NodeInstanceRole-NUOhaPBRl3DK
+      username: system:node:{{EC2PrivateDNSName}}
+      groups:
+      - system:bootstrappers
+      - system:nodes
+
+  mapUsers: |
+    - userarn: arn:aws:iam::399966706871:user/detourist-ecr
+      username: detourist-ecr
+      groups:
+        - system:masters
+    - userarn: arn:aws:iam::399966706871:user/matt-detourist
+      username: matt-detourist
+      groups:
+        - system:masters
