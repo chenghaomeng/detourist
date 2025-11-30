@@ -99,7 +99,6 @@ def format_batch_summary(results: List[ScoringEvaluationResult]) -> str:
         f"Successful: {len(successful)}",
         f"Errors: {len(results) - len(successful)}",
         "",
-        f"Matches: {matches}/{len(successful)}",
         f"Accuracy: {accuracy:.1f}%",
         "",
         f"Total processing time: {total_time:.2f}s",

@@ -436,6 +436,65 @@ def get_ground_truth_scoring_examples() -> list[ScoringGroundTruthExample]:
             ],
             best_route_index=1,  # Scenic/landmarks route should score higher
         ),
+        
+        # Example 11: SF Financial District to Golden Gate Park - Efficiency vs Scenic
+        # Route 0: Direct route (fastest)
+        # Route 1: Scenic route through landmarks (longer but more scenic)
+        ScoringGroundTruthExample(
+            example_id="sf_fidi_golden_gate_scoring_001",
+            user_prompt="Drive from Financial District to Golden Gate Park. I want to see landmarks and take a scenic route, but I don't want it to take too long.",
+            route_inputs=[
+                # Route 0: Direct route (fastest, no waypoints)
+                ScoringRouteInput(
+                    origin=Coordinates(latitude=37.7946, longitude=-122.4020),  # Financial District
+                    destination=Coordinates(latitude=37.7694, longitude=-122.4862),  # Golden Gate Park
+                    waypoint_coords=[],
+                    constraints={
+                        "transport_mode": "driving",
+                        "avoid_tolls": False,
+                        "avoid_stairs": False,
+                        "avoid_hills": False,
+                        "avoid_highways": True,
+                    },
+                ),
+                # Route 1: Scenic route with landmarks (should balance efficiency and scenic value)
+                ScoringRouteInput(
+                    origin=Coordinates(latitude=37.7946, longitude=-122.4020),  # Financial District
+                    destination=Coordinates(latitude=37.7694, longitude=-122.4862),  # Golden Gate Park
+                    waypoint_coords=[
+                        Coordinates(latitude=37.8024, longitude=-122.4058),  # Telegraph Hill / Coit Tower (landmark)
+                        Coordinates(latitude=37.7764, longitude=-122.4317),  # Alamo Square (landmark, scenic)
+                    ],
+                    constraints={
+                        "transport_mode": "driving",
+                        "avoid_tolls": False,
+                        "avoid_stairs": False,
+                        "avoid_hills": False,
+                        "avoid_highways": True,
+                    },
+                ),
+                # Route 2: Very long scenic route (too many waypoints, takes too long)
+                ScoringRouteInput(
+                    origin=Coordinates(latitude=37.7946, longitude=-122.4020),  # Financial District
+                    destination=Coordinates(latitude=37.7694, longitude=-122.4862),  # Golden Gate Park
+                    waypoint_coords=[
+                        Coordinates(latitude=37.8024, longitude=-122.4058),  # Telegraph Hill
+                        Coordinates(latitude=37.8047, longitude=-122.4098),  # North Beach
+                        Coordinates(latitude=37.8006, longitude=-122.4581),  # Presidio
+                        Coordinates(latitude=37.8033, longitude=-122.4654),  # Crissy Field
+                        Coordinates(latitude=37.7764, longitude=-122.4317),  # Alamo Square
+                    ],
+                    constraints={
+                        "transport_mode": "driving",
+                        "avoid_tolls": False,
+                        "avoid_stairs": False,
+                        "avoid_hills": False,
+                        "avoid_highways": True,
+                    },
+                ),
+            ],
+            best_route_index=1,  # Route 1 should score highest - good balance of scenic value and efficiency
+        ),
     ]
 
 
