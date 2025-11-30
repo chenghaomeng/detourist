@@ -24,7 +24,6 @@ spec:
           env:
             - name: OLLAMA_KEEP_ALIVE
               value: "24h"
-          # Pull the small model *after* the server is up so the container can be Ready.
           lifecycle:
             postStart:
               exec:
@@ -33,7 +32,6 @@ spec:
                   - -lc
                   - |
                     echo "[postStart] pulling model llama3.2:3b-instruct-q4_K_M ..."
-                    # Pull; don't fail the pod if network hiccups; backend can trigger a pull on demand later too
                     ollama pull llama3.2:3b-instruct-q4_K_M || true
           readinessProbe:
             httpGet:
@@ -52,11 +50,11 @@ spec:
             timeoutSeconds: 3
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "750m"
+              memory: "1536Mi"
             limits:
               cpu: "2000m"
-              memory: "3Gi"
+              memory: "3072Mi"  # ~3 GiB cap for 3B Q4_K_M + KV + overhead
           volumeMounts:
             - name: ollama-home
               mountPath: /root/.ollama

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: har-backend-deployment
+  namespace: har-local
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: har-backend
+  template:
+    metadata:
+      labels:
+        app: har-backend
+    spec:
+      containers:
+      - name: har-backend
+        image: 399966706871.dkr.ecr.us-east-1.amazonaws.com/detourist/har-backend:dev
+        imagePullPolicy: IfNotPresent
+        ports:
+          - containerPort: 8000
+        envFrom:
+          - configMapRef:
+              name: har-backend-config
+          - secretRef:
+              name: har-backend-secrets
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8000 }
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8000 }
+          initialDelaySeconds: 10
+          periodSeconds: 20
