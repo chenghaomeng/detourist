@@ -5,10 +5,16 @@ metadata:
   name: har-backend-config
   namespace: har-local
 data:
-  # --- LLM (Ollama) ---
-  LLM_PROVIDER: ollama
-  OLLAMA_BASE_URL: http://detourist-ollama:11434
-  OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
+  # --- LLM (OpenAI) ---
+  # Options: openai, ollama, auto
+  LLM_PROVIDER: openai
+  OPENAI_API_KEY: "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"  # Replace with your actual key
+  OPENAI_MODEL: gpt-4o-mini  # Fast and cost-effective
+  
+  # --- LLM (Ollama) - Disabled but kept for fallback ---
+  # Uncomment to use Ollama instead or set LLM_PROVIDER to "auto" for fallback
+  # OLLAMA_BASE_URL: http://detourist-ollama:11434
+  # OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
 
   # --- Redis (cache) ---
   REDIS_URL: redis://har-redis:6379/0

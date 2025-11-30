@@ -13,7 +13,11 @@ services:
       # Optional API keys
       - LLM_API_KEY=${LLM_API_KEY:-}
       - MAPILLARY_TOKEN=${MAPILLARY_TOKEN:-}
-      # 🚀 Docker Ollama configuration
+      # 🤖 LLM Provider Configuration (openai, ollama, or auto)
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      # 🚀 Docker Ollama configuration (used if LLM_PROVIDER=ollama or auto)
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       # Redis connection (use Docker service name)
@@ -28,8 +32,6 @@ services:
       - ./logs:/app/logs
     depends_on:
       redis:
-        condition: service_started
-      ollama:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
@@ -67,6 +69,8 @@ services:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_KEEP_ALIVE=10m
     restart: unless-stopped
+    profiles:
+      - ollama  # Only start with: docker-compose --profile ollama up
 
   redis:
     image: redis:7-alpine
