@@ -45,7 +45,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 2: SF Civic Center to Golden Gate Bridge Viewpoint
         GroundTruthExample(
             example_id="sf_civic_golden_gate_001",
-            user_prompt="Avoid freeways until Presidio. Prefer Marina/Crissy Field/Palace of fine arts. Destination Golden Gate View Point. Starting point civic center",
+            user_prompt="Drive from Civic Center in San Francisco to Golden Gate View Point. I want to avoid freeways until I reach Presidio. I prefer going through the Marina, Crissy Field, or Palace of Fine Arts areas along the waterfront.",
             origin_text="Civic Center, San Francisco",
             origin_coords=Coordinates(latitude=37.7770, longitude=-122.4195),
             destination_text="Golden Gate View Point, San Francisco",
@@ -70,10 +70,10 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 3: Marina to FiDi
         GroundTruthExample(
             example_id="sf_marina_fidi_001",
-            user_prompt="Marina to Embarcadero using Lombard across Russian Hill and Columbus through North Beach. Go through touristy spots.",
-            origin_text="2301 Chestnut St (Marina)",
+            user_prompt="Drive from the Marina district to Embarcadero in San Francisco. I want to use Lombard Street across Russian Hill and Columbus Avenue through North Beach. I'd like to see historic streets and landmarks along the way.",
+            origin_text="Marina, San Francisco",
             origin_coords=Coordinates(latitude=37.8002, longitude=-122.4414),
-            destination_text="Embarcadero, San Francisco, CA",
+            destination_text="Embarcadero, San Francisco",
             destination_coords=Coordinates(latitude=37.7955, longitude=-122.3936),
             time_flexibility_minutes=10,
             constraints={
@@ -95,10 +95,10 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 4: Noe Valley through Twin Peaks
         GroundTruthExample(
             example_id="sf_noe_twin_peaks_001",
-            user_prompt="Noe Valley then scenic twin peaks drive and then back down to castro.",
-            origin_text="Noe Valley (Clipper St.)",
+            user_prompt="Drive from Noe Valley through a scenic Twin Peaks route and then down to Market and Castro. I want to see hills vistas, landmarks, and scenic overlooks.",
+            origin_text="Noe Valley, San Francisco",
             origin_coords=Coordinates(latitude=37.7506, longitude=-122.4331),
-            destination_text="Market and Castro",
+            destination_text="Market and Castro, San Francisco",
             destination_coords=Coordinates(latitude=37.7614, longitude=-122.4350),
             time_flexibility_minutes=10,
             constraints={
@@ -111,10 +111,8 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
             preferences="hills vistas, landmarks, scenic overlook",
             waypoint_coords=[
                 Coordinates(latitude=37.7506, longitude=-122.4331),  # Noe Valley
-                Coordinates(latitude=37.7506, longitude=-122.4331),  # Clipper St.
                 Coordinates(latitude=37.7526, longitude=-122.4470),  # Twin Peaks Blvd Switch Backs
                 Coordinates(latitude=37.7514, longitude=-122.4470),  # Twin Peaks overlook
-                Coordinates(latitude=37.7506, longitude=-122.4331),  # Clarendon Ave
                 Coordinates(latitude=37.7614, longitude=-122.4350),  # Market and Castro
             ],
         ),
@@ -122,10 +120,10 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 5: Chill Coffee in Noe then Japantown
         GroundTruthExample(
             example_id="sf_noe_japantown_001",
-            user_prompt="Drive from la lucha coffee bar to japantown, pass by scenic sf parks.",
+            user_prompt="Drive from La Lucha Coffee Bar in San Francisco to Japantown. I want to pass by scenic parks, see some landmarks, and travel on historic streets or boulevards.",
             origin_text="La Lucha Coffee Bar, San Francisco",
             origin_coords=Coordinates(latitude=37.7506, longitude=-122.4331),
-            destination_text="Japantown, San Francisco (Post & Buchanan)",
+            destination_text="Japantown, San Francisco",
             destination_coords=Coordinates(latitude=37.7855, longitude=-122.4297),
             time_flexibility_minutes=10,
             constraints={
@@ -135,13 +133,12 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
                 "avoid_hills": False,
                 "avoid_highways": True,
             },
-            preferences="boulevards, landmarks, historic streets, parks",
+            preferences="parks, landmarks, historic streets, boulevards",
             waypoint_coords=[
                 Coordinates(latitude=37.7506, longitude=-122.4331),  # La Lucha Coffee Bar
                 Coordinates(latitude=37.7597, longitude=-122.4264),  # Dolores Street
                 Coordinates(latitude=37.7597, longitude=-122.4264),  # Mission Dolores Park
                 Coordinates(latitude=37.7764, longitude=-122.4317),  # Steiner St / Alamo Square (Painted Ladies)
-                Coordinates(latitude=37.7855, longitude=-122.4297),  # Post St
                 Coordinates(latitude=37.7855, longitude=-122.4297),  # Japantown Peace Plaza
             ],
         ),
@@ -149,7 +146,7 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 6: Civic Center to Coit Tower
         GroundTruthExample(
             example_id="sf_civic_coit_001",
-            user_prompt="Go from civic center to coit tower. Take me through popular streets like close to chinatown or busy hilly cable car streets.",
+            user_prompt="Drive from Civic Center in San Francisco to Coit Tower. I want to go through historic streets near Chinatown and see some landmarks along the way.",
             origin_text="Civic Center, San Francisco",
             origin_coords=Coordinates(latitude=37.7799, longitude=-122.4188),
             destination_text="Coit Tower, San Francisco",
@@ -177,10 +174,10 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
         # Example 7: Beach Chalet to Presidio Tunnel Tops
         GroundTruthExample(
             example_id="sf_beach_presidio_001",
-            user_prompt="Beach Chalet restaurant to presidio tunnel tops, as much coastline as possible. Prefer cliffside roads rather than inner city streets.",
-            origin_text="Beach Chalet Brewery & Restaurant",
+            user_prompt="Drive from Beach Chalet restaurant to Presidio Tunnel Tops. I want to follow the coastline as much as possible, see waterfronts and parks, and prefer cliffside roads with hills vistas and landmarks rather than inner city streets.",
+            origin_text="Beach Chalet Brewery & Restaurant, San Francisco",
             origin_coords=Coordinates(latitude=37.7694, longitude=-122.5094),
-            destination_text="Presidio Tunnel Tops",
+            destination_text="Presidio Tunnel Tops, San Francisco",
             destination_coords=Coordinates(latitude=37.8006, longitude=-122.4581),
             time_flexibility_minutes=10,
             constraints={
@@ -310,6 +307,30 @@ def get_ground_truth_examples() -> list[GroundTruthExample]:
             waypoint_coords=[
                 Coordinates(latitude=37.7914, longitude=-122.4058),  # Historic street area
                 Coordinates(latitude=37.7946, longitude=-122.4058),  # Chinatown entrance
+            ],
+        ),
+        
+        # Example 13: North Beach to Mission Bay
+        GroundTruthExample(
+            example_id="sf_north_beach_mission_bay_001",
+            user_prompt="Drive from North Beach to Mission Bay in San Francisco. I want to see landmarks and travel on scenic routes. Avoid highways.",
+            origin_text="North Beach, San Francisco",
+            origin_coords=Coordinates(latitude=37.8047, longitude=-122.4098),
+            destination_text="Mission Bay, San Francisco",
+            destination_coords=Coordinates(latitude=37.7706, longitude=-122.3892),
+            time_flexibility_minutes=10,
+            constraints={
+                "transport_mode": "driving",
+                "avoid_tolls": False,
+                "avoid_stairs": False,
+                "avoid_hills": False,
+                "avoid_highways": True,
+            },
+            preferences="landmarks, scenic routes",
+            waypoint_coords=[
+                Coordinates(latitude=37.8024, longitude=-122.4058),  # Telegraph Hill / Coit Tower
+                Coordinates(latitude=37.7946, longitude=-122.4020),  # Financial District landmarks
+                Coordinates(latitude=37.7849, longitude=-122.4094),  # Scenic route through city
             ],
         ),
     ]

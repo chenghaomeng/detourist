@@ -112,7 +112,7 @@ def format_result_summary(result: EvaluationResult) -> str:
     # Coordinate proximity comparison
     if result.coordinate_proximity:
         comp = result.coordinate_proximity
-        lines.append(f"\n📍 Coordinate Proximity:")
+        lines.append("\n📍 Coordinate Proximity:")
         origin_status = "✅ PASS" if comp.origin_within_radius else "❌ FAIL"
         dest_status = "✅ PASS" if comp.destination_within_radius else "❌ FAIL"
         lines.append(f"  {origin_status} Origin: {comp.origin_distance_miles:.2f} miles")
@@ -192,11 +192,11 @@ def format_batch_summary(results: List[EvaluationResult]) -> str:
         
         extraction_stats = f"""
 Extraction Accuracy:
-  Origin:         {origin_matches}/{len(extraction_results)} ({origin_matches/len(extraction_results)*100:.1f}%)
-  Destination:    {dest_matches}/{len(extraction_results)} ({dest_matches/len(extraction_results)*100:.1f}%)
-  Time Flex:      {time_matches}/{len(extraction_results)} ({time_matches/len(extraction_results)*100:.1f}%)
-  Constraints:    {constraint_matches}/{len(extraction_results)} ({constraint_matches/len(extraction_results)*100:.1f}%)
-  Preferences:    {preference_matches}/{len(extraction_results)} ({preference_matches/len(extraction_results)*100:.1f}%)
+  Origin:         {origin_matches/len(extraction_results)*100:.1f}%
+  Destination:    {dest_matches/len(extraction_results)*100:.1f}%
+  Time Flex:      {time_matches/len(extraction_results)*100:.1f}%
+  Constraints:    {constraint_matches/len(extraction_results)*100:.1f}%
+  Preferences:    {preference_matches/len(extraction_results)*100:.1f}%
 """
     else:
         extraction_stats = ""
@@ -210,8 +210,8 @@ Extraction Accuracy:
     if score_comparisons:
         score_stats = f"""
 Route Score Comparison:
-  LLM Parity with Ground Truth: {score_wins}/{len(score_comparisons)} ({score_wins/len(score_comparisons)*100:.1f}%)
-  LLM Worse than Ground Truth:  {score_losses}/{len(score_comparisons)} ({score_losses/len(score_comparisons)*100:.1f}%)
+  LLM Parity with Ground Truth: {score_wins/len(score_comparisons)*100:.1f}%
+  LLM Worse than Ground Truth:  {score_losses/len(score_comparisons)*100:.1f}%
 """
     
     # Coordinate proximity stats
@@ -222,13 +222,11 @@ Route Score Comparison:
     
     coord_stats = ""
     if coord_proximities:
-        # Get radius from first example (all should have same radius)
-        radius = coord_proximities[0].radius_miles if coord_proximities else 2.0
         coord_stats = f"""
 Coordinate Proximity:
-  Origin:       {origin_passes}/{len(coord_proximities)} ({origin_passes/len(coord_proximities)*100:.1f}%)
-  Destination:  {dest_passes}/{len(coord_proximities)} ({dest_passes/len(coord_proximities)*100:.1f}%)
-  Both:         {both_pass}/{len(coord_proximities)} ({both_pass/len(coord_proximities)*100:.1f}%)
+  Origin:       {origin_passes/len(coord_proximities)*100:.1f}%
+  Destination:  {dest_passes/len(coord_proximities)*100:.1f}%
+  Both:         {both_pass/len(coord_proximities)*100:.1f}%
 """
     
     # Average processing time

@@ -1,10 +1,12 @@
 """
-LLM providers with Ollama (Llama 3.1) support.
+LLM providers with Ollama (Llama 3.1) and OpenAI support.
 
 Environment variables used:
-  - LLM_PROVIDER=ollama            # default
+  - LLM_PROVIDER=ollama|openai     # default: ollama
   - OLLAMA_BASE_URL=http://detourist-ollama:11434  # or http://localhost:11434
   - OLLAMA_MODEL=llama3.1:8b-instruct-q4_K_M
+  - OPENAI_API_KEY=sk-...          # Required for OpenAI
+  - OPENAI_MODEL=gpt-4o-mini       # default
 """
 
 from __future__ import annotations
@@ -140,16 +142,137 @@ class LlamaProvider(LLMProvider):
         return None
 
 
+class OpenAIProvider(LLMProvider):
+    """
+    OpenAI provider via REST API.
+    
+    Requires OPENAI_API_KEY environment variable.
+    Uses gpt-4o-mini by default (fast and cost-effective).
+    """
+
+    def __init__(self, model_name: str = "gpt-4o-mini", api_key: Optional[str] = None):
+        super().__init__(model_name)
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
+        self.base_url = "https://api.openai.com/v1/chat/completions"
+        
+    def is_available(self) -> bool:
+        """Check if OpenAI API key is configured."""
+        if not self.api_key:
+            self.logger.warning("[LLM] OpenAI API key not configured")
+            return False
+        if not self.api_key.startswith("sk-"):
+            self.logger.warning("[LLM] OpenAI API key format appears invalid")
+            return False
+        return True
+    
+    def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
+        """Call OpenAI API and return response."""
+        if not self.is_available():
+            raise Exception("OpenAI API key not configured")
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that extracts structured information. Always respond with valid JSON when requested."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+        
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 700,
+        }
+        
+        try:
+            self.logger.info(f"[LLM] POST {self.base_url} (model={self.model_name})")
+            resp = requests.post(self.base_url, json=payload, headers=headers, timeout=60)
+            resp.raise_for_status()
+            result = resp.json()
+            
+            # Extract the assistant's message content
+            text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            self.logger.info(f"[LLM] rx chars={len(text)}")
+            
+            if not expect_json:
+                return text.strip()
+            
+            # Try to extract JSON from the response
+            js = self._extract_json(text)
+            if js is not None:
+                return js
+            
+            # If the model already returned naked JSON:
+            t = text.strip()
+            if t.startswith("{") and t.endswith("}"):
+                return t
+            
+            raise Exception("No JSON object found in LLM response")
+            
+        except requests.exceptions.Timeout:
+            raise Exception("OpenAI request timed out")
+        except requests.exceptions.HTTPError as e:
+            if resp.status_code == 401:
+                raise Exception("OpenAI API authentication failed - check your API key")
+            elif resp.status_code == 429:
+                raise Exception("OpenAI API rate limit exceeded")
+            else:
+                raise Exception(f"OpenAI API error: {resp.status_code} - {resp.text}")
+        except requests.exceptions.ConnectionError as e:
+            raise Exception(f"Cannot connect to OpenAI API: {e}")
+        except Exception as e:
+            self.logger.exception(f"[LLM] call failed: {e}")
+            raise
+    
+    def _extract_json(self, text: str) -> Optional[str]:
+        """Extract JSON from response text."""
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"(\{.*\})", text, flags=re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        return None
+
+
 class LLMProviderManager:
     """Manager that selects a provider and offers a single `extract_parameters` API."""
 
     def __init__(self, api_key: str = ""):
         self.logger = logging.getLogger(__name__)
         choice = os.getenv("LLM_PROVIDER", "ollama").lower()
-        model = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
         providers: List[LLMProvider] = []
-        if choice in ("ollama", "auto"):
-            providers.append(LlamaProvider(model))
+        
+        if choice == "openai":
+            # Use OpenAI exclusively
+            openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            openai_key = api_key or os.getenv("OPENAI_API_KEY", "")
+            providers.append(OpenAIProvider(openai_model, openai_key))
+        elif choice == "ollama":
+            # Use Ollama exclusively
+            ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+            providers.append(LlamaProvider(ollama_model))
+        elif choice == "auto":
+            # Try OpenAI first, fallback to Ollama
+            openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            openai_key = api_key or os.getenv("OPENAI_API_KEY", "")
+            ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+            providers.append(OpenAIProvider(openai_model, openai_key))
+            providers.append(LlamaProvider(ollama_model))
+        else:
+            # Default to ollama
+            ollama_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
+            providers.append(LlamaProvider(ollama_model))
+            
         self.providers = providers
 
     def extract_parameters(self, prompt: str, expect_json: bool = True) -> str:
