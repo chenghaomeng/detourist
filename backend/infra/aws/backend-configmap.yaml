@@ -1,58 +1,3 @@
-################################################################
-###################### Nov 3 ###################################
-# apiVersion: v1
-# kind: ConfigMap
-# metadata:
-#   name: har-backend-config
-#   namespace: har-local
-# data:
-#   # --- Orchestrator ---
-#   ORCH_MODE: parallel
-#
-#   # --- LLM (Ollama) ---
-#   LLM_PROVIDER: ollama
-#   OLLAMA_BASE_URL: http://detourist-ollama:11434
-#   OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
-#
-#   # --- Redis ---
-#   REDIS_URL: redis://har-redis:6379/0
-#
-#   # --- CORS ---
-#   ALLOW_ORIGINS: "*"
-#
-#   # --- Transport & alternatives ---
-#   FORCE_TRANSPORT_MODE: driving
-#   ALLOW_DIRECTIONS_ALTERNATIVES: "true"
-#   MAX_DIRECT_ALTERNATIVES: "3"
-#
-#   # --- Geocoding/routing knobs ---
-#   MB_ISO_MAX_MIN: "60"
-#
-#   # --- Overpass (waypoint search parallelism) ---
-#   OVERPASS_MAX_WORKERS: "2"     # (3 is fine too; 2 is friendlier to Overpass)
-#   OVERPASS_DELAY_SEC: "0.15"
-#
-#   # --- Candidate generation (MORE waypoints & routes) ---
-#   WP_TOP_K: "12"                # keep top 12 unique waypoints after dedupe
-#   ROUTE_MAX_SINGLE: "6"         # up to 6 single-waypoint routes
-#   ROUTE_MAX_PAIRS:  "6"         # up to 6 two-waypoint routes
-#   ROUTE_MAX_TRIPLES: "2"        # up to 2 three-waypoint routes
-#   MAX_WP_PER_ROUTE: "3"         # safety cap: no route has >3 waypoints
-#   RB_MAX_CANDIDATES: "20"       # hard cap on total candidates sent to Mapbox
-#
-#   # --- Parallel workers ---
-#   RB_MAX_WORKERS: "4"           # parallel Mapbox route builds
-#   SCORER_MAX_WORKERS: "2"       # parallel CLIP scoring (keep at 2 on 4Gi)
-#
-#   # --- Scoring (CLIP + Mapillary) ---
-#   ENABLE_SCORING: "true"
-#   SCORING_MIN_IMAGES: "2"       # keep CLIP work bounded
-#   SCORING_MAX_IMAGES: "4"
-#   CLIP_MODEL_NAME: openai/clip-vit-base-patch32
-#
-#   # --- (Optional) perf stability for PyTorch/NumPy BLAS ---
-#   OMP_NUM_THREADS: "2"
-#   MKL_NUM_THREADS: "2"
 
 ##########################################################################
 #################### TEST WAYPOINT AND ROUTE NUMBERS NOV 3 ###############
@@ -104,3 +49,38 @@ data:
   # Perf stability
   OMP_NUM_THREADS: "2"
   MKL_NUM_THREADS: "2"
+
+######################################################################
+############### USING OPENAI MODEL NOV 30 ############################
+####################################
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: har-backend-config
+#   namespace: har-local
+# data:
+#   # --- LLM (OpenAI) ---
+#   # Options: openai, ollama, auto
+#   LLM_PROVIDER: openai
+#   OPENAI_API_KEY: "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"  # Replace with your actual key
+#   OPENAI_MODEL: gpt-4o-mini  # Fast and cost-effective
+  
+#   # --- LLM (Ollama) - Disabled but kept for fallback ---
+#   # Uncomment to use Ollama instead or set LLM_PROVIDER to "auto" for fallback
+#   # OLLAMA_BASE_URL: http://detourist-ollama:11434
+#   # OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
+
+#   # --- Redis (cache) ---
+#   REDIS_URL: redis://har-redis:6379/0
+
+#   # --- CORS ---
+#   ALLOW_ORIGINS: "*"
+
+#   # --- Geocoding/routing knobs ---
+#   MB_ISO_MAX_MIN: "60"   # search-zone travel-time budget (min)
+
+#   # --- Scoring (CLIP + Mapillary) ---
+#   ENABLE_SCORING: "true"
+#   SCORING_MIN_IMAGES: "3"
+#   SCORING_MAX_IMAGES: "6"
+#   CLIP_MODEL_NAME: openai/clip-vit-base-patch32
