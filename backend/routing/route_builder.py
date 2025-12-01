@@ -126,6 +126,27 @@ class RouteBuilder:
         routes.sort(key=lambda r: r.total_duration_seconds)
         return routes
 
+    def build_direct_route(
+        self,
+        origin: Coordinates,
+        destination: Coordinates,
+        constraints: Dict[str, bool],
+    ) -> Route:
+        """
+        Convenience wrapper for a direct origin -> destination route with no waypoints.
+
+        This is what the orchestrator expects when it wants a simple O/D route,
+        and internally it just reuses the same `_build_multi_route` logic
+        you already use for the no-waypoint fallback in `build_routes`.
+        """
+        return self._build_multi_route(
+            origin=origin,
+            destination=destination,
+            waypoints=[],
+            constraints=constraints,
+            optimize_order=False,
+        )
+
     def build_single_route(
         self,
         origin: Coordinates,
