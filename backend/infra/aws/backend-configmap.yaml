@@ -1,34 +1,91 @@
 
 ##########################################################################
 #################### TEST WAYPOINT AND ROUTE NUMBERS NOV 3 ###############
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: har-backend-config
+#   namespace: har-local
+# data:
+#   ORCH_MODE: parallel
+
+#   # LLM / Ollama in-cluster service URL (if you run Ollama inside EKS)
+#   LLM_PROVIDER: ollama
+#   OLLAMA_BASE_URL: http://detourist-ollama:11434
+#   OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
+
+#   # Redis & CORS
+#   REDIS_URL: redis://har-redis:6379/0
+#   ALLOW_ORIGINS: "*"
+
+#   # Transport & routing knobs
+#   FORCE_TRANSPORT_MODE: driving
+#   ALLOW_DIRECTIONS_ALTERNATIVES: "true"
+#   MAX_DIRECT_ALTERNATIVES: "3"
+#   MB_ISO_MAX_MIN: "60"
+
+#   # LLM extraction tuning
+#   WQ_NUM_TAGS: "6"
+#   WQ_MAX_RETURN: "12"
+
+#   # Waypoint / candidate generation
+#   WP_TOP_K: "8"
+#   ROUTE_MAX_SINGLE: "6"
+#   ROUTE_MAX_PAIRS: "6"
+#   ROUTE_MAX_TRIPLES: "0"
+#   MAX_WP_PER_ROUTE: "3"
+#   RB_MAX_CANDIDATES: "12"
+
+#   # Parallel workers
+#   RB_MAX_WORKERS: "4"
+#   SCORER_MAX_WORKERS: "2"
+
+#   # Scoring (CLIP + Mapillary)
+#   ENABLE_SCORING: "true"
+#   SCORING_MIN_IMAGES: "2"
+#   SCORING_MAX_IMAGES: "4"
+#   CLIP_MODEL_NAME: openai/clip-vit-base-patch32
+
+#   # Perf stability
+#   OMP_NUM_THREADS: "2"
+#   MKL_NUM_THREADS: "2"
+
+######################################################################
+############### USING OPENAI MODEL NOV 30 ############################
+####################################
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: har-backend-config
   namespace: har-local
 data:
+  # Orchestrator mode
   ORCH_MODE: parallel
 
-  # LLM / Ollama in-cluster service URL (if you run Ollama inside EKS)
-  LLM_PROVIDER: ollama
-  OLLAMA_BASE_URL: http://detourist-ollama:11434
-  OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
+  # -------- LLM provider (OpenAI) --------
+  # Options: openai | ollama | auto
+  LLM_PROVIDER: openai
+  OPENAI_MODEL: gpt-4o-mini
 
-  # Redis & CORS
+  # (Optional fallback: keep these commented for later if you ever go back to Ollama)
+  # OLLAMA_BASE_URL: http://detourist-ollama:11434
+  # OLLAMA_MODEL: llama3.2:3b-instruct-q4_K_M
+
+  # -------- Redis & CORS --------
   REDIS_URL: redis://har-redis:6379/0
   ALLOW_ORIGINS: "*"
 
-  # Transport & routing knobs
+  # -------- Transport & routing knobs --------
   FORCE_TRANSPORT_MODE: driving
   ALLOW_DIRECTIONS_ALTERNATIVES: "true"
   MAX_DIRECT_ALTERNATIVES: "3"
   MB_ISO_MAX_MIN: "60"
 
-  # LLM extraction tuning
+  # -------- LLM extraction tuning --------
   WQ_NUM_TAGS: "6"
   WQ_MAX_RETURN: "12"
 
-  # Waypoint / candidate generation
+  # -------- Waypoint / candidate generation --------
   WP_TOP_K: "8"
   ROUTE_MAX_SINGLE: "6"
   ROUTE_MAX_PAIRS: "6"
@@ -36,23 +93,28 @@ data:
   MAX_WP_PER_ROUTE: "3"
   RB_MAX_CANDIDATES: "12"
 
-  # Parallel workers
+  # -------- Parallel workers --------
+  # top-level ThreadPool (LLM + geocoding fan-out)
+  ORCH_MAX_WORKERS: "4"
+  # parallel route builds
   RB_MAX_WORKERS: "4"
+  # parallel CLIP scoring
   SCORER_MAX_WORKERS: "2"
+  # Overpass waypoint queries
+  OVERPASS_MAX_WORKERS: "2"
+  OVERPASS_DELAY_SEC: "0.2"
 
-  # Scoring (CLIP + Mapillary)
+  # -------- Scoring (CLIP + Mapillary) --------
   ENABLE_SCORING: "true"
   SCORING_MIN_IMAGES: "2"
   SCORING_MAX_IMAGES: "4"
   CLIP_MODEL_NAME: openai/clip-vit-base-patch32
 
-  # Perf stability
+  # -------- Perf stability --------
   OMP_NUM_THREADS: "2"
   MKL_NUM_THREADS: "2"
 
-######################################################################
-############### USING OPENAI MODEL NOV 30 ############################
-####################################
+
 # apiVersion: v1
 # kind: ConfigMap
 # metadata:
