@@ -233,6 +233,7 @@ class RouteOrchestratorSync:
                         "time_flexibility_minutes": ep.time_flexibility_minutes,
                         "waypoint_queries": ep.waypoint_queries,
                         "constraints": ep.constraints,
+                        "preferences": ep.preferences,
                     },
                     ttl_seconds=1800,
                 )
@@ -330,7 +331,7 @@ class RouteOrchestratorSync:
 
             for c in candidates:
                 try:
-                    r = self.route_builder.build_route(origin_coords, dest_coords, c, constraints)
+                    r = self.route_builder.build_single_route(origin_coords, dest_coords, c, constraints)
                     if r:
                         built.append(r)
                 except Exception as e:
