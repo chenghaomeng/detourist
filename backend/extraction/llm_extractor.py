@@ -12,6 +12,7 @@ import textwrap
 import requests
 
 from backend.extraction.faiss_osm_validator import FAISSOSMTagValidator
+from backend.extraction.prompts import create_extraction_prompt_with_candidates, PREFERENCE_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -53,7 +54,7 @@ class LLMExtractor:
         if not self.api_key:
             logger.warning("[LLMExtractor] No API key set for OpenAI (OPENAI_API_KEY / LLM_API_KEY).")
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        self._validator = FAISSOSMTagValidator()
+        self._validator = FAISSOSMTagValidator(include_descriptions_in_faiss_index=True)
 
         logger.info(
             "[LLMExtractor] Using OpenAI model=%s (key prefix=%s…)",
@@ -66,62 +67,36 @@ class LLMExtractor:
 
     # ----------------- Public API -----------------
 
-    def extract_parameters(self, user_prompt: str) -> ExtractedParameters:
+    def extract_parameters(self, user_prompt: str, num_tags: int = 5) -> ExtractedParameters:
         """
         Main entrypoint used by RouteOrchestrator.
 
-        1) Ask OpenAI for structured JSON.
-        2) Normalize fields.
-        3) Use FAISSOSMTagValidator to turn natural-language interests
-           into OSM-style waypoint queries.
+        Pipeline:
+          1) LLM extracts concise preference concepts (plain text, comma-separated).
+          2) FAISS finds candidate OSM tags from those concepts.
+          3) LLM receives the candidate list and returns STRICT JSON with origin/dest,
+             time_flexibility_minutes, waypoint_queries (subset of candidates), constraints.
         """
         try:
-            raw_json = self._call_openai_for_json(user_prompt)
+            # Step 1: Preference concepts (plain text, comma separated)
+            pref_prompt = PREFERENCE_EXTRACTION_PROMPT.format(user_prompt=user_prompt)
+            preferences = self._call_openai_for_text(pref_prompt).strip()
+            if not preferences:
+                raise Exception("LLM returned empty preferences")
+
+            # Step 2: FAISS lookup for candidate OSM tags based on those concepts
+            candidate_tags = self._validator.get_candidate_tags(preferences, top_k=max(10, num_tags * 4))
+            candidate_tag_strings = [f"{t.key}={t.value}" for t in candidate_tags]
+
+            # Step 3: Strict JSON extraction using the hard candidate list
+            extraction_prompt = create_extraction_prompt_with_candidates(user_prompt, candidate_tag_strings, num_tags)
+            raw_json = self._call_openai_for_json(extraction_prompt)
             data = self._safe_json_parse(raw_json)
 
-            origin = data.get("origin") or data.get("origin_text") or ""
-            destination = data.get("destination") or data.get("destination_text") or ""
-
-            time_flex = data.get("time_flexibility_minutes")
-            if isinstance(time_flex, str) and time_flex.isdigit():
-                time_flex = int(time_flex)
-            elif not isinstance(time_flex, int):
-                time_flex = None
-
-            # Preferences text (used only for debugging / metadata)
-            preferences = data.get("preferences") or data.get("notes") or ""
-
-            # Step 2: map NL "interests" -> candidate OSM tag queries via FAISS
-            nl_waypoints = data.get("waypoint_queries") or data.get("interests") or []
-            if isinstance(nl_waypoints, str):
-                nl_waypoints = [nl_waypoints]
-
-            if not isinstance(nl_waypoints, list):
-                nl_waypoints = []
-
-            try:
-                osm_queries = self._validator.enhance_waypoint_queries(
-                    [str(q) for q in nl_waypoints if q]
-                )
-            except Exception as e:
-                logger.warning("[LLMExtractor] FAISS validator failed, falling back to raw queries: %s", e)
-                osm_queries = [str(q) for q in nl_waypoints if q]
-
-            constraints = data.get("constraints") or {}
-            if not isinstance(constraints, dict):
-                constraints = {}
-
-            # Ensure we always have a transport_mode
-            constraints.setdefault("transport_mode", os.getenv("DEFAULT_TRANSPORT_MODE", "driving"))
-
-            return ExtractedParameters(
-                origin=str(origin),
-                destination=str(destination),
-                time_flexibility_minutes=time_flex,
-                waypoint_queries=list(osm_queries),
-                constraints=constraints,
-                preferences=str(preferences),
-            )
+            params = self._create_extracted_parameters(data, preferences)
+            logger.info("LLM extractor ok | origin=%s dest=%s tags=%s preferences=%s",
+                         params.origin, params.destination, params.waypoint_queries, params.preferences)
+            return params
 
         except Exception as e:
             logger.error("Error extracting parameters from prompt: %s", e, exc_info=True)
@@ -129,7 +104,61 @@ class LLMExtractor:
 
     # ----------------- OpenAI helpers -----------------
 
-    def _call_openai_for_json(self, user_prompt: str) -> str:
+    def _call_openai_for_text(self, prompt: str) -> str:
+        """
+        Call OpenAI chat completions and return plain text response.
+        Used for preference extraction (step 1).
+        """
+        if not self.api_key:
+            raise RuntimeError(
+                "No OpenAI API key configured. Set OPENAI_API_KEY or LLM_API_KEY."
+            )
+
+        body: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.1,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        url = f"{self._base_url}/chat/completions"
+        resp = requests.post(url, headers=headers, json=body, timeout=40)
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            text = None
+            try:
+                text = resp.text
+            except Exception:
+                pass
+            logger.error(
+                "[LLMExtractor] OpenAI HTTP error: %s (status=%s, body=%r)",
+                e,
+                resp.status_code,
+                text,
+            )
+            raise
+
+        js = resp.json()
+        try:
+            content = js["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(
+                "[LLMExtractor] Unexpected OpenAI response format: %s (json=%r)",
+                e,
+                js,
+            )
+            raise RuntimeError("Unexpected response format from OpenAI.")
+
+        return content.strip()
+
+    def _call_openai_for_json(self, prompt: str) -> str:
         """
         Call OpenAI chat completions and request a strict JSON response.
 
@@ -141,45 +170,12 @@ class LLMExtractor:
                 "No OpenAI API key configured. Set OPENAI_API_KEY or LLM_API_KEY."
             )
 
-        system_prompt = textwrap.dedent(
-            """
-            You are a routing parameter extractor. Given a user's free-form request
-            for a trip or route, you MUST return a single JSON object with this
-            exact structure (all keys present):
-
-            {
-              "origin": "short origin place string",
-              "destination": "short destination place string",
-              "time_flexibility_minutes": 30,
-              "waypoint_queries": [
-                "short natural-language interest 1",
-                "short natural-language interest 2"
-              ],
-              "constraints": {
-                "transport_mode": "driving",
-                "avoid_tolls": false,
-                "avoid_ferries": false
-              },
-              "preferences": "short sentence summarizing extra soft preferences"
-            }
-
-            Rules:
-            - origin and destination should be concise, user-friendly place strings.
-            - time_flexibility_minutes should be an integer if mentioned, otherwise null.
-            - waypoint_queries must be SHORT phrases like "parks", "waterfront viewpoints",
-              "cafes with outdoor seating".
-            - constraints.transport_mode: one of "driving", "walking", "cycling".
-            - You MUST return ONLY a JSON object. No markdown, no explanation.
-            """
-        ).strip()
-
         body: Dict[str, Any] = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": prompt},
             ],
-            "temperature": 0.0,
+            "temperature": 0.1,
             "response_format": {"type": "json_object"},
         }
 
@@ -219,6 +215,31 @@ class LLMExtractor:
             raise RuntimeError("Unexpected response format from OpenAI.")
 
         return content
+
+    def _create_extracted_parameters(self, data: Dict[str, Any], preferences: str) -> ExtractedParameters:
+        """
+        Create ExtractedParameters from parsed JSON data and preferences string.
+        """
+        constraints = data.get("constraints", {}) or {}
+        if not isinstance(constraints, dict):
+            constraints = {}
+
+        wq = [q for q in data.get("waypoint_queries", []) if isinstance(q, str) and q.strip()]
+        
+        return ExtractedParameters(
+            origin=data.get("origin", ""),
+            destination=data.get("destination", ""),
+            time_flexibility_minutes=int(data.get("time_flexibility_minutes", 10)),
+            waypoint_queries=wq[:10],
+            constraints={
+                "avoid_tolls": bool(constraints.get("avoid_tolls", False)),
+                "avoid_stairs": bool(constraints.get("avoid_stairs", False)),
+                "avoid_hills": bool(constraints.get("avoid_hills", False)),
+                "avoid_highways": bool(constraints.get("avoid_highways", False)),
+                "transport_mode": constraints.get("transport_mode", os.getenv("DEFAULT_TRANSPORT_MODE", "walking")),
+            },
+            preferences=preferences,
+        )
 
     def _safe_json_parse(self, s: str) -> Dict[str, Any]:
         """

@@ -443,7 +443,7 @@ class RouteOrchestrator:
                 if len(candidates) == 1 or self.rb_max_workers <= 1:
                     for c in candidates:
                         try:
-                            r = self.route_builder.build_route(origin_coords, dest_coords, c, constraints)
+                            r = self.route_builder.build_single_route(origin_coords, dest_coords, c, constraints)
                             if r:
                                 built.append(r)
                         except Exception as e:
@@ -452,7 +452,7 @@ class RouteOrchestrator:
                     with ThreadPoolExecutor(max_workers=min(self.rb_max_workers, len(candidates))) as rpool:
                         futs = {
                             rpool.submit(
-                                self.route_builder.build_route, origin_coords, dest_coords, c, constraints
+                                self.route_builder.build_single_route, origin_coords, dest_coords, c, constraints
                             ): tuple(c)
                             for c in candidates
                         }
