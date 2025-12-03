@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ScoringWeights:
     """Weights for different scoring components."""
-    clip_weight: float = 0.2
-    duration_weight: float = 0.5
-    waypoint_relevance_weight: float = 0.3
+    clip_weight: float = 0.3
+    duration_weight: float = 0.3
+    waypoint_relevance_weight: float = 0.4
 
 
 @dataclass
@@ -109,16 +109,16 @@ class RouteScorer:
     ) -> float:
         """
         Recompute overall score given individual component scores.
-        
+
         This is useful for evaluation scenarios where you want to recompute
         overall scores with modified CLIP scores (e.g., normalized across batches).
-        
+
         Args:
             clip_score: Normalized CLIP score (0-100)
             efficiency_score: Efficiency score (0-100)
             preference_score: Preference match score (0-100). Defaults to 0.0.
             evaluation_mode: If True, excludes preference_score from calculation.
-            
+
         Returns:
             Overall score (0-100)
         """
@@ -203,7 +203,7 @@ class RouteScorer:
             normalized_clip_relative = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
             # Absolute normalization for fair comparison across batches
             normalized_clip_absolute = clip_score_raw * 100.0
-            
+
             efficiency_score = self._calculate_efficiency_score(route, min_duration)
             preference_score = self._calculate_preference_match_score(route)
             # Use relative CLIP score for overall_score calculation (for correct ranking)
@@ -358,7 +358,7 @@ class RouteScorer:
             return 100.0
         duration = route.total_duration_seconds
         ratio = (duration - min_duration) / max(1, min_duration)
-        score = 100 - 10 * ((ratio + 1) ** 3)
+        score = 100 - 50 * ((ratio) ** 2)
         return float(max(0.0, min(100.0, score)))
 
     def _calculate_preference_match_score(self, route: Route) -> float:
@@ -369,19 +369,19 @@ class RouteScorer:
         return float(min(100.0, avg_rel * bonus))
 
     def _combine_scores(
-        self, 
-        clip_score: float, 
-        efficiency_score: float, 
+        self,
+        clip_score: float,
+        efficiency_score: float,
         preference_score: float,
         evaluation_mode: bool = False
     ) -> float:
         """
         Combine scores into overall score.
-        
+
         In evaluation_mode, preference_score is excluded from overall score calculation
         because waypoints are provided directly (not searched), making preference_match
         scores meaningless (they're based on hardcoded values, not actual preference matching).
-        
+
         In regular mode, all three components are included.
         """
         if evaluation_mode:
@@ -393,7 +393,7 @@ class RouteScorer:
             else:
                 clip_weight = 0.5
                 duration_weight = 0.5
-            
+
             return (
                 clip_weight * clip_score
                 + duration_weight * efficiency_score
