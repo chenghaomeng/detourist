@@ -358,7 +358,7 @@ class RouteScorer:
             return 100.0
         duration = route.total_duration_seconds
         ratio = (duration - min_duration) / max(1, min_duration)
-        score = 100 - 10 * ((ratio) ** 2)
+        score = 100 - 50 * ((ratio) ** 2)
         return float(max(0.0, min(100.0, score)))
 
     def _calculate_preference_match_score(self, route: Route) -> float:
