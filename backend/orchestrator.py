@@ -480,12 +480,42 @@ class RouteOrchestrator:
             min_imgs = int(os.getenv("SCORING_MIN_IMAGES", "3" if use_images else "0"))
             max_imgs = int(os.getenv("SCORING_MAX_IMAGES", "6" if use_images else "0"))
 
+            # Calculate baseline duration
+            baseline_key = {
+                "o": self._coords_to_dict(origin_coords),
+                "d": self._coords_to_dict(dest_coords),
+                "mode": constraints.get("transport_mode", "driving"),
+            }
+            cached_baseline = self.cache.get_json("baseline_duration_v1", baseline_key)
+            if cached_baseline:
+                baseline_duration = int(cached_baseline.get("duration", 0))
+                self.logger.info("[baseline] Using cached baseline: %ds", baseline_duration)
+            else:
+                try:
+                    baseline_duration = self.route_builder.get_baseline_duration(
+                        origin_coords, dest_coords, constraints
+                    )
+                    self.cache.set_json(
+                        "baseline_duration_v1",
+                        baseline_key,
+                        {"duration": baseline_duration},
+                        ttl_seconds=86400  # Cache for 24h (baseline routes don't change often)
+                    )
+                    self.logger.info("[baseline] Computed baseline: %ds", baseline_duration)
+                except Exception as e:
+                    self.logger.warning("[baseline] Failed to compute baseline: %s. Using fallback.", e)
+                    # Fallback: estimate from routes if available
+                    baseline_duration = min(r.total_duration_seconds for r in routes) if routes else 600
+            timings["baseline_duration"] = time.time() - t
+            t = time.time()
+
             def _score_one(r: Route) -> RouteScore:
                 return self.route_scorer.score_routes(
                     [r],
                     request.user_prompt,
                     min_images_per_route=min_imgs,
                     max_images_per_route=max_imgs,
+                    baseline_duration=baseline_duration,
                 )[0]
 
             scored: List[RouteScore] = []

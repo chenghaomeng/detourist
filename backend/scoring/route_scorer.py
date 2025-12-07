@@ -132,6 +132,7 @@ class RouteScorer:
         max_images_per_route: Optional[int] = None,
         debug: bool = False,
         evaluation_mode: bool = False,
+        baseline_duration: Optional[int] = None,
     ) -> List[RouteScore]:
         """
         Score routes and return ranked results.
@@ -147,8 +148,9 @@ class RouteScorer:
             max_images_per_route = self.max_images_default
 
         scored_routes: List[RouteScore] = []
-        min_duration = min(r.total_duration_seconds for r in routes)
-        max_clip_score = 0.0
+
+        if baseline_duration is None:
+            baseline_duration = min(r.total_duration_seconds for r in routes)
 
         # Pass 1: fetch images & compute raw clip scores
         route_clip_scores: List[Tuple[float, List[float]]] = []
@@ -192,33 +194,38 @@ class RouteScorer:
                     logger.debug(f"[scoring] Route {i+1}: CLIP score=0.0 (no images)")
 
             route_clip_scores.append((clip_score, image_scores))
-            max_clip_score = max(max_clip_score, clip_score)
 
-        # Pass 2: normalize and combine
-        # Always use relative normalization for overall_score (to match production ranking behavior)
-        # But also store absolute CLIP scores for fair comparison in evaluations
+        # Pass 2: Use ABSOLUTE normalization
         for i, route in enumerate(routes):
             clip_score_raw, image_scores = route_clip_scores[i]
-            # Relative normalization for ranking (matches production behavior)
-            normalized_clip_relative = (clip_score_raw / max_clip_score * 100) if max_clip_score > 0 else 0.0
-            # Absolute normalization for fair comparison across batches
+
+            # Absolute CLIP normalization - CLIP scores are already [0,1], scale to 0-100
             normalized_clip_absolute = clip_score_raw * 100.0
 
-            efficiency_score = self._calculate_efficiency_score(route, min_duration)
+            # Absolute efficiency score using baseline_duration
+            efficiency_score = self._calculate_efficiency_score_absolute(route, baseline_duration)
+
+            # Preference score is already absolute (unchanged)
             preference_score = self._calculate_preference_match_score(route)
-            # Use relative CLIP score for overall_score calculation (for correct ranking)
-            overall = self._combine_scores(normalized_clip_relative, efficiency_score, preference_score, evaluation_mode)
+
+            # MODIFIED: Use absolute CLIP score for overall calculation
+            overall = self._combine_scores(
+                normalized_clip_absolute,  # Changed from normalized_clip_relative
+                efficiency_score,
+                preference_score,
+                evaluation_mode
+            )
 
             scored_routes.append(
                 RouteScore(
                     route=route,
-                    clip_score=float(normalized_clip_relative),  # Relative for display/ranking
+                    clip_score=float(normalized_clip_absolute),  # MODIFIED: Now using absolute
                     efficiency_score=float(efficiency_score),
                     preference_match_score=float(preference_score),
                     overall_score=float(overall),
                     image_scores=[float(s) for s in image_scores],
                     num_images=len(image_scores),
-                    clip_score_absolute=float(normalized_clip_absolute),  # Absolute for comparison
+                    clip_score_absolute=float(normalized_clip_absolute),  # Same as clip_score now
                 )
             )
 
@@ -352,21 +359,64 @@ class RouteScorer:
             return [0.0] * len(images)
 
     # ------------------------- Other metrics -------------------------
+    def _calculate_efficiency_score_absolute(self, route: Route, baseline_duration: int) -> float:  # NEW METHOD
+        """
+        Calculate efficiency score using ABSOLUTE normalization against a baseline.
+
+        This works with parallel route scoring because it doesn't depend on batch statistics.
+        Routes are penalized quadratically for taking longer than the baseline.
+
+        Args:
+            route: The route to score
+            baseline_duration: Reference duration (e.g., direct/shortest path) in seconds
+
+        Returns:
+            Efficiency score from 0-100, where:
+            - 100 = route matches baseline duration exactly
+            - Decreases as route takes longer than baseline
+            - ~50 = route is ~71% longer than baseline
+            - ~0 = route is 100%+ longer than baseline
+
+        Examples:
+            baseline=600s (10 min):
+            - route=600s  -> 100.0
+            - route=720s  -> 94.0 (20% longer)
+            - route=900s  -> 77.8 (50% longer)
+            - route=1200s -> 0.0  (100% longer)
+        """
+        if baseline_duration <= 0:
+            return 100.0
+
+        duration = route.total_duration_seconds
+
+        # Calculate how much longer this route is vs baseline
+        ratio = (duration - baseline_duration) / max(1, baseline_duration)
+
+        # Quadratic penalty: routes 100%+ longer get score near 0
+        score = 100 - 100 * (ratio ** 2)
+
+        return float(max(0.0, min(100.0, score)))
 
     def _calculate_efficiency_score(self, route: Route, min_duration: int) -> float:
         if min_duration <= 0:
             return 100.0
         duration = route.total_duration_seconds
         ratio = (duration - min_duration) / max(1, min_duration)
-        score = 100 - 50 * ((ratio) ** 2)
+        score = 100 - 100 * ((ratio) ** 2)
         return float(max(0.0, min(100.0, score)))
 
     def _calculate_preference_match_score(self, route: Route) -> float:
         if not route.waypoints:
             return 0
         avg_rel = float(np.mean([w.relevance_score for w in route.waypoints]))
-        bonus = 1.0 + self.waypoint_bonus_rate * (len(route.waypoints) - 1)
-        return float(min(100.0, avg_rel * bonus))
+        num_waypoints = len(route.waypoints)
+        base_score = avg_rel * 8 # 80% of max score
+        if num_waypoints >= 2:
+            bonus = 20 * (1 - math.exp(-(num_waypoints - 1) / 1.5)) # add portion of 20%
+        else:
+            bonus = 7 # add 7% if only 1 waypoint
+        total_score = base_score + bonus
+        return float(min(100.0, total_score))
 
     def _combine_scores(
         self,

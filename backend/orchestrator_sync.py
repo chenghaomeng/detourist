@@ -351,11 +351,36 @@ class RouteOrchestratorSync:
             use_images = os.getenv("ENABLE_SCORING", "false").lower() == "true"
             min_imgs = int(os.getenv("SCORING_MIN_IMAGES", "3" if use_images else "0"))
             max_imgs = int(os.getenv("SCORING_MAX_IMAGES", "6" if use_images else "0"))
+            baseline_key = {
+                "o": self._coords_to_dict(origin_coords),
+                "d": self._coords_to_dict(dest_coords),
+                "mode": constraints.get("transport_mode", "driving"),
+            }
+            cached_baseline = self.cache.get_json("baseline_duration_v1", baseline_key)
+            if cached_baseline:
+                baseline_duration = int(cached_baseline.get("duration", 0))
+            else:
+                try:
+                    baseline_duration = self.route_builder.get_baseline_duration(
+                        origin_coords, dest_coords, constraints
+                    )
+                    self.cache.set_json(
+                        "baseline_duration_v1",
+                        baseline_key,
+                        {"duration": baseline_duration},
+                        ttl_seconds=86400
+                    )
+                except Exception as e:
+                    self.logger.warning("Baseline calculation failed: %s. Using fallback.", e)
+                    baseline_duration = min(r.total_duration_seconds for r in routes) if routes else 600
+            timings["baseline_duration_sync"] = time.time() - t
+
             scored: List[RouteScore] = self.route_scorer.score_routes(
                 routes,
                 request.user_prompt,
                 min_images_per_route=min_imgs,
                 max_images_per_route=max_imgs,
+                baseline_duration=baseline_duration,
             )
             scored.sort(key=lambda s: s.overall_score, reverse=True)
             max_results = max(1, int(request.max_results or 3))
