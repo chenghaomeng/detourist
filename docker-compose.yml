@@ -13,16 +13,16 @@ services:
       # Optional API keys
       - LLM_API_KEY=${LLM_API_KEY:-}
       - MAPILLARY_TOKEN=${MAPILLARY_TOKEN:-}
-      # 🤖 LLM Provider Configuration (openai, ollama, or auto)
+      # LLM Provider Configuration (openai, ollama, or auto)
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
-      # 🚀 Docker Ollama configuration (used if LLM_PROVIDER=ollama or auto)
+      # Docker Ollama configuration (used if LLM_PROVIDER=ollama or auto)
       - OLLAMA_BASE_URL=http://ollama:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
       # Redis connection (use Docker service name)
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      # 🎨 CLIP Scoring Configuration
+      # CLIP Scoring Configuration
       - CLIP_MODEL_NAME=${CLIP_MODEL_NAME:-openai/clip-vit-base-patch32}
       - ENABLE_SCORING=${ENABLE_SCORING:-true}
       - SCORING_MIN_IMAGES=${SCORING_MIN_IMAGES:-3}
