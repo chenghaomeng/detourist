@@ -157,21 +157,44 @@ class RouteBuilder:
     ) -> Route:
         """
         Build a single route using ALL provided waypoints.
-        
+
         This is useful for ground truth routes where you want a definitive route
         that uses all waypoints, rather than selecting from multiple candidates.
-        
+
         Args:
             origin: Starting point coordinates
             destination: Ending point coordinates
             waypoints: All waypoints to include in the route
             constraints: Routing constraints
             optimize_order: Whether to optimize waypoint order for efficiency (default: True)
-            
+
         Returns:
             A single Route object using all provided waypoints
         """
         return self._build_multi_route(origin, destination, waypoints, constraints, optimize_order)
+
+    def get_baseline_duration(
+        self,
+        origin: Coordinates,
+        destination: Coordinates,
+        constraints: Dict[str, bool],
+    ) -> int:
+        """
+        Compute the baseline (shortest/direct) duration for efficiency scoring.
+
+        This builds a direct route with no waypoints and returns its duration.
+        Use this as the baseline_duration when scoring routes in parallel.
+
+        Args:
+            origin: Starting point coordinates
+            destination: Ending point coordinates
+            constraints: Routing constraints (same as used for actual routes)
+
+        Returns:
+            Duration in seconds for the direct route
+        """
+        direct_route = self.build_direct_route(origin, destination, constraints)
+        return direct_route.total_duration_seconds
 
     # ----------------------- Internals -----------------------
 
