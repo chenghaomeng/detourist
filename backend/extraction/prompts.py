@@ -56,6 +56,7 @@ waypoint_queries MUST be selected exactly from the following candidate list of t
 
 If there is an EXACT waypoint mentioned in the user request, ALWAYS add it to the waypoint_queries in this format: "name=value", even if it doesn't appear in the candidate list.
 For example, if the user explicitly says they want to stop by the Empire State Building on the way, you can add it to the waypoint_queries as "name=Empire State Building".
+Do NOT add the Origin or Destination to the waypoint_queries. These should be extracted as the origin and destination parameters.
 
 IMPORTANT WAYPOINT QUERY TAG SELECTION GUIDELINES:
 - Prefer common tags over rare ones (e.g., "natural=water" over "waterway=seaway")
