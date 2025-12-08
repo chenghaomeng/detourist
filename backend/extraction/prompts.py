@@ -54,6 +54,9 @@ Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
 waypoint_queries MUST be selected exactly from the following candidate list of tags (pick up to {num_tags}):
 {candidates_block}
 
+If there is an EXACT waypoint mentioned in the user request, ALWAYS add it to the waypoint_queries in this format: "name=value", even if it doesn't appear in the candidate list.
+For example, if the user explicitly says they want to stop by the Empire State Building on the way, you can add it to the waypoint_queries as "name=Empire State Building".
+
 IMPORTANT WAYPOINT QUERY TAG SELECTION GUIDELINES:
 - Prefer common tags over rare ones (e.g., "natural=water" over "waterway=seaway")
 - For coastal/waterfront: prefer "natural=water", "natural=beach", "natural=coastline", "leisure=marina"
