@@ -47,7 +47,7 @@ data:
   # parallel route builds
   RB_MAX_WORKERS: "4"
   # parallel CLIP scoring
-  SCORER_MAX_WORKERS: "2"
+  SCORER_MAX_WORKERS: "4"
   # Overpass waypoint queries
   OVERPASS_MAX_WORKERS: "2"
   OVERPASS_DELAY_SEC: "0.2"
