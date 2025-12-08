@@ -15,7 +15,8 @@ spec:
     spec:
       containers:
       - name: har-backend
-        image: 085710282102.dkr.ecr.us-east-1.amazonaws.com/detourist/har-backend:dev-main-20251204-2221
+        image: 085710282102.dkr.ecr.us-east-1.amazonaws.com/detourist/har-backend:dev-main-20251207-1648
+
         imagePullPolicy: IfNotPresent
         ports:
           - containerPort: 8000
