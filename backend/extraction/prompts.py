@@ -31,20 +31,10 @@ def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: l
 
     candidates_block = "\n".join(f"- {c}" for c in candidate_tags)
     return f"""
-You are a strict JSON generator.
+You are a strict JSON generator. Parse the following user request and return a JSON object with extracted route parameters.
 
 User request:
 {user_prompt}
-
-Candidate OSM tags (pick up to {num_tags}):
-{candidates_block}
-
-IMPORTANT SELECTION GUIDELINES:
-- Prefer common tags over rare ones (e.g., "natural=water" over "waterway=seaway")
-- For coastal/waterfront: prefer "natural=water", "natural=beach", "natural=coastline", "leisure=marina"
-- For scenic/views: prefer "tourism=viewpoint", "leisure=park", "natural=peak"
-- For parks/green: prefer "leisure=park", "leisure=garden", "landuse=forest"
-- Avoid very specific tags that may not exist in urban areas
 
 Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
 {{
@@ -61,9 +51,18 @@ Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
   }}
 }}
 
-IMPORTANT:
-- waypoint_queries MUST be selected from the candidate list (exact key=value matches).
-- when extracting the origin and destination, always be as specific as possible and include the city or town.
-- if time flexibility is not specified, set it to 10 minutes.
-- transport_mode must be either "walking" or "driving".
+waypoint_queries MUST be selected exactly from the following candidate list of tags (pick up to {num_tags}):
+{candidates_block}
+
+IMPORTANT WAYPOINT QUERY TAG SELECTION GUIDELINES:
+- Prefer common tags over rare ones (e.g., "natural=water" over "waterway=seaway")
+- For coastal/waterfront: prefer "natural=water", "natural=beach", "natural=coastline", "leisure=marina"
+- For scenic/views: prefer "tourism=viewpoint", "leisure=park", "natural=peak"
+- For parks/green: prefer "leisure=park", "leisure=garden", "landuse=forest"
+- Avoid very specific tags that may not exist in urban areas
+
+IMPORTANT EXTRACTION GUIDELINES:
+- When extracting the Origin and Destination, always be as specific as possible and include the city or town.
+- If time flexibility is not specified, set it to 10 minutes.
+- Transport_mode must be either "walking" or "driving".
 """
