@@ -31,7 +31,7 @@ def create_extraction_prompt_with_candidates(user_prompt: str, candidate_tags: l
 
     candidates_block = "\n".join(f"- {c}" for c in candidate_tags)
     return f"""
-You are a strict JSON generator. Parse the following user request and return a JSON object with extracted route parameters.
+You are a strict JSON generator. Parse the following user request and return a JSON with extracted route parameters.
 
 User request:
 {user_prompt}
@@ -53,10 +53,6 @@ Return ONLY valid minified JSON (no markdown, no commentary) with this schema:
 
 waypoint_queries MUST be selected exactly from the following candidate list of tags (pick up to {num_tags}):
 {candidates_block}
-
-If there is an EXACT waypoint mentioned in the user request, ALWAYS add it to the waypoint_queries in this format: "name=value", even if it doesn't appear in the candidate list.
-For example, if the user explicitly says they want to stop by the Empire State Building on the way, you can add it to the waypoint_queries as "name=Empire State Building".
-Do NOT add the Origin or Destination to the waypoint_queries. These should be extracted as the origin and destination parameters.
 
 IMPORTANT WAYPOINT QUERY TAG SELECTION GUIDELINES:
 - Prefer common tags over rare ones (e.g., "natural=water" over "waterway=seaway")
